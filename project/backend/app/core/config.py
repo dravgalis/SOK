@@ -20,6 +20,7 @@ class Settings(BaseModel):
 
     frontend_app_url: str = os.getenv('FRONTEND_APP_URL', 'http://localhost:5173')
     app_secret_key: str = os.getenv('APP_SECRET_KEY', 'change-me-in-production')
+    cookie_secure: bool = os.getenv('COOKIE_SECURE', 'false').lower() == 'true'
 
     cors_origins_raw: str = os.getenv('CORS_ORIGINS', 'http://localhost:5173')
 

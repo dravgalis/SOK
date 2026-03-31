@@ -13,11 +13,12 @@ class HHClientError(Exception):
 
 class HHClient:
     TOKEN_URL = 'https://hh.ru/oauth/token'
+    API_BASE_URL = 'https://api.hh.ru'
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    async def exchange_code(self, code: str) -> dict[str, Any]:
+    async def exchange_code(self, code: str) -> str:
         data = {
             'grant_type': 'authorization_code',
             'client_id': self.settings.hh_client_id,
@@ -25,30 +26,56 @@ class HHClient:
             'code': code,
             'redirect_uri': self.settings.hh_redirect_uri,
         }
+        payload = await self._request('POST', self.TOKEN_URL, data=data)
+
+        access_token = payload.get('access_token')
+        if not isinstance(access_token, str) or not access_token:
+            raise HHClientError('В ответе HeadHunter OAuth отсутствует access_token.')
+
+        return access_token
+
+    async def get_current_user(self, access_token: str) -> dict[str, Any]:
+        return await self._request('GET', f'{self.API_BASE_URL}/me', access_token=access_token)
+
+    async def get_vacancies(self, access_token: str, per_page: int = 20) -> dict[str, Any]:
+        return await self._request(
+            'GET',
+            f'{self.API_BASE_URL}/vacancies',
+            access_token=access_token,
+            params={'per_page': str(per_page)},
+        )
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        access_token: str | None = None,
+        params: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        headers = {'User-Agent': 'SOK-HH-MVP/1.0'}
+        if access_token:
+            headers['Authorization'] = f'Bearer {access_token}'
+
+        request_kwargs: dict[str, Any] = {'headers': headers, 'params': params}
+        if data is not None:
+            request_kwargs['data'] = data
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    self.TOKEN_URL,
-                    data=data,
-                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                )
+                response = await client.request(method, url, **request_kwargs)
         except httpx.HTTPError as exc:
-            raise HHClientError('Не удалось связаться с HeadHunter OAuth API.') from exc
+            raise HHClientError('Не удалось связаться с HeadHunter API.') from exc
 
         if response.status_code >= 400:
             try:
                 detail = response.json()
             except ValueError:
                 detail = response.text
-            raise HHClientError(f'HeadHunter OAuth вернул ошибку: {detail}')
+            raise HHClientError(f'HeadHunter API вернул ошибку: {detail}')
 
         try:
-            payload = response.json()
+            return response.json()
         except ValueError as exc:
-            raise HHClientError('HeadHunter OAuth вернул некорректный ответ.') from exc
-
-        if 'access_token' not in payload:
-            raise HHClientError('В ответе HeadHunter OAuth отсутствует access_token.')
-
-        return payload
+            raise HHClientError('HeadHunter API вернул некорректный ответ.') from exc
