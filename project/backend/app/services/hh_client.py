@@ -89,50 +89,87 @@ class HHClient:
         vacancy_id: str,
         *,
         per_page: int = 100,
+        employer_id: str | None = None,
     ) -> dict[str, Any]:
-        all_items: list[dict[str, Any]] = []
-        page = 0
-        debug_calls: list[dict[str, Any]] = []
         hh_endpoint = f'{self.API_BASE_URL}/negotiations'
+        call_variants: list[dict[str, str]] = [{'vacancy_id': str(vacancy_id), 'per_page': str(per_page), 'page': '0'}]
+        if employer_id:
+            call_variants.append(
+                {
+                    'vacancy_id': str(vacancy_id),
+                    'employer_id': str(employer_id),
+                    'per_page': str(per_page),
+                    'page': '0',
+                },
+            )
+        debug_calls: list[dict[str, Any]] = []
+        parse_warning: str | None = None
 
-        while True:
-            payload = await self._request(
+        for params in call_variants:
+            payload, meta = await self._request_with_meta(
                 'GET',
                 hh_endpoint,
                 access_token=access_token,
-                params={
-                    'vacancy_id': str(vacancy_id),
-                    'per_page': str(per_page),
-                    'page': str(page),
-                },
+                params=params,
                 allow_statuses={404},
                 debug_context={
                     'operation': 'get_vacancy_responses',
                     'vacancy_id': str(vacancy_id),
                 },
             )
-            if isinstance(payload.get('_debug'), dict):
-                debug_calls.append(payload['_debug'])
+            debug_calls.append(meta)
 
-            if payload.get('_status_code') == 404:
-                return {'items': [], 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
+            if meta['status_code'] == 404:
+                continue
 
             items = self._extract_response_items(payload)
-            pages = payload.get('pages')
+            found = payload.get('found') if isinstance(payload, dict) else None
+            if items:
+                return {'items': items, 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
+            if isinstance(found, int) and found > 0:
+                parse_warning = f'HH returned found={found}, but items were not parsed.'
 
-            if isinstance(items, list):
-                all_items.extend(item for item in items if isinstance(item, dict))
+        return {
+            'items': [],
+            'debug': {
+                'hh_endpoint': hh_endpoint,
+                'calls': debug_calls,
+                'parse_warning': parse_warning,
+            },
+        }
 
-            if not isinstance(pages, int):
-                break
+    async def get_vacancy_responses_raw_debug(
+        self,
+        access_token: str,
+        vacancy_id: str,
+        *,
+        per_page: int = 100,
+        employer_id: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, str] = {'vacancy_id': str(vacancy_id), 'per_page': str(per_page), 'page': '0'}
+        if employer_id:
+            params['employer_id'] = str(employer_id)
+        payload, meta = await self._request_with_meta(
+            'GET',
+            f'{self.API_BASE_URL}/negotiations',
+            access_token=access_token,
+            params=params,
+            allow_statuses={404},
+            debug_context={'operation': 'debug_raw_vacancy_responses', 'vacancy_id': str(vacancy_id)},
+        )
+        return {
+            'vacancy_id': str(vacancy_id),
+            'hh_request_url': meta['request_url'],
+            'query_params': meta['query_params'],
+            'status_code': meta['status_code'],
+            'raw': payload,
+        }
 
-            page += 1
-            if page >= pages:
-                break
-
-        return {'items': all_items, 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
-
-    def _extract_response_items(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _extract_response_items(self, payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if not isinstance(payload, dict):
+            return []
         candidate_keys = ('items', 'negotiations', 'responses', 'data')
         for key in candidate_keys:
             value = payload.get(key)
@@ -151,6 +188,30 @@ class HHClient:
         allow_statuses: set[int] | None = None,
         debug_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        payload, _ = await self._request_with_meta(
+            method,
+            url,
+            access_token=access_token,
+            params=params,
+            data=data,
+            allow_statuses=allow_statuses,
+            debug_context=debug_context,
+        )
+        if isinstance(payload, dict):
+            return payload
+        return {'raw': payload}
+
+    async def _request_with_meta(
+        self,
+        method: str,
+        url: str,
+        *,
+        access_token: str | None = None,
+        params: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+        allow_statuses: set[int] | None = None,
+        debug_context: dict[str, Any] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
         headers = {'User-Agent': 'SOK-HH-MVP/1.0'}
         if access_token:
             headers['Authorization'] = f'Bearer {access_token}'
@@ -182,31 +243,20 @@ class HHClient:
                 response_body_preview,
             )
 
+        meta = {
+            'request_url': str(response.request.url),
+            'query_params': params or {},
+            'request_headers': safe_headers,
+            'status_code': response.status_code,
+            'response_body_preview': response_body_preview,
+        }
+
         if allow_statuses and response.status_code in allow_statuses:
             try:
                 payload = response.json()
             except ValueError:
                 payload = {}
-            if isinstance(payload, dict):
-                payload['_status_code'] = response.status_code
-                payload['_debug'] = {
-                    'request_url': str(response.request.url),
-                    'query_params': params or {},
-                    'request_headers': safe_headers,
-                    'status_code': response.status_code,
-                    'response_body_preview': response_body_preview,
-                }
-                return payload
-            return {
-                '_status_code': response.status_code,
-                '_debug': {
-                    'request_url': str(response.request.url),
-                    'query_params': params or {},
-                    'request_headers': safe_headers,
-                    'status_code': response.status_code,
-                    'response_body_preview': response_body_preview,
-                },
-            }
+            return payload, meta
 
         if response.status_code >= 400:
             try:
@@ -220,13 +270,4 @@ class HHClient:
         except ValueError as exc:
             raise HHClientError('HeadHunter API вернул некорректный ответ.') from exc
 
-        if not isinstance(payload, dict):
-            payload = {'raw': payload}
-        payload['_debug'] = {
-            'request_url': str(response.request.url),
-            'query_params': params or {},
-            'request_headers': safe_headers,
-            'status_code': response.status_code,
-            'response_body_preview': response_body_preview,
-        }
-        return payload
+        return payload, meta

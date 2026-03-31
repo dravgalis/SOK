@@ -226,7 +226,9 @@ async def get_vacancy_responses(
     hh_client = HHClient(get_settings())
 
     try:
-        response_result = await hh_client.get_vacancy_responses_with_debug(token, vacancy_id)
+        me = await hh_client.get_current_user(token)
+        employer_id = _extract_employer_id(me)
+        response_result = await hh_client.get_vacancy_responses_with_debug(token, vacancy_id, employer_id=employer_id)
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -242,10 +244,35 @@ async def get_vacancy_responses(
     return payload
 
 
+@router.get('/debug/vacancies/{vacancy_id}/responses/raw')
+async def debug_vacancy_responses_raw(
+    vacancy_id: str,
+    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
+) -> dict[str, object]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        me = await hh_client.get_current_user(token)
+        employer_id = _extract_employer_id(me)
+        return await hh_client.get_vacancy_responses_raw_debug(token, vacancy_id, employer_id=employer_id)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict[str, object] | None:
     for item in items:
         if str(item.get('id', '')) == vacancy_id:
             return item
+    return None
+
+
+def _extract_employer_id(me_payload: dict[str, object]) -> str | None:
+    employer = me_payload.get('employer')
+    if isinstance(employer, dict):
+        employer_id = employer.get('id')
+        if isinstance(employer_id, (str, int)):
+            return str(employer_id)
     return None
 
 
