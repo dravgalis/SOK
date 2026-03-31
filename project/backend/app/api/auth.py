@@ -247,34 +247,6 @@ def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict
 
 def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object]:
     return {
-        **mapped_vacancy,
-        'description': _as_string_or_none(vacancy_item.get('description')),
-    }
-
-
-@router.get('/vacancies/{vacancy_id}/responses')
-async def get_vacancy_responses(
-    vacancy_id: str,
-    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
-) -> dict[str, object]:
-    token = _require_access_token(access_token)
-    hh_client = HHClient(get_settings())
-
-    try:
-        response_items = await hh_client.get_vacancy_responses(token, vacancy_id)
-    except HHClientError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    responses = [_map_response(item) for item in response_items]
-    return {
-        'vacancy_id': vacancy_id,
-        'items': responses,
-        'count': len(responses),
-    }
-
-
-def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object]:
-    return {
         'id': str(item.get('id', '')),
         'name': _as_string(item.get('name')),
         'status': _normalize_status(archived),
