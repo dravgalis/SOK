@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { APP_ENDPOINTS } from '../config';
 
 type Me = {
@@ -15,8 +16,11 @@ type Vacancy = {
   id: string;
   name: string;
   status?: string | null;
+  normalized_status?: string | null;
+  archived?: boolean;
   published_at?: string | null;
   archived_at?: string | null;
+  responses_count?: number;
 };
 
 type VacancyTabKey = 'active' | 'archived';
@@ -55,6 +59,18 @@ function getVacancyMetaDate(tab: VacancyTabKey, vacancy: Vacancy): string {
 
 function getVacancyMetaLabel(tab: VacancyTabKey): string {
   return tab === 'archived' ? 'Дата архивирования' : 'Дата публикации';
+}
+
+function getNormalizedStatus(tab: VacancyTabKey, vacancy: Vacancy): string {
+  if (vacancy.normalized_status) {
+    return vacancy.normalized_status;
+  }
+
+  if (typeof vacancy.archived === 'boolean') {
+    return vacancy.archived ? 'Архивная' : 'Активная';
+  }
+
+  return tab === 'archived' ? 'Архивная' : 'Активная';
 }
 
 export function DashboardPage() {
@@ -178,18 +194,15 @@ export function DashboardPage() {
             <ul className="vacancies-list">
               {selectedVacancies.map((vacancy) => (
                 <li key={vacancy.id} className="vacancy-item">
-                  <a
-                    href={`/app/vacancies/${vacancy.id}`}
-                    onClick={(event) => event.preventDefault()}
-                    className="vacancy-link"
-                  >
+                  <Link to={`/app/vacancies/${vacancy.id}`} className="vacancy-link">
                     <strong>{vacancy.name}</strong>
                     <span>
                       {getVacancyMetaLabel(activeTab)}: {getVacancyMetaDate(activeTab, vacancy)}
                     </span>
-                    <span>Статус: {vacancy.status || '—'}</span>
+                    <span>Статус: {getNormalizedStatus(activeTab, vacancy)}</span>
+                    <span>Отклики: {vacancy.responses_count ?? 0}</span>
                     <span>ID: {vacancy.id}</span>
-                  </a>
+                  </Link>
                 </li>
               ))}
             </ul>
