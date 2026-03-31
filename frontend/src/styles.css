@@ -1,0 +1,153 @@
+:root {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #111827;
+  background-color: #f3f6fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(720px, 100%);
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.08);
+  padding: 40px;
+  display: grid;
+  gap: 24px;
+}
+
+.auth-header h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  line-height: 1.25;
+}
+
+.auth-header p {
+  margin: 12px 0 0;
+  color: #4b5563;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.primary-button,
+.secondary-button {
+  border: none;
+  border-radius: 12px;
+  padding: 14px 18px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #ff3366, #ec1e53);
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(236, 30, 83, 0.25);
+}
+
+.primary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.primary-button:disabled {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+.auth-disclaimer {
+  margin: -8px 0 0;
+  font-size: 0.9rem;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.auth-info-block,
+.auth-benefits,
+.status-block {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 16px;
+  background-color: #fcfdff;
+}
+
+.auth-info-block h2,
+.auth-benefits h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.auth-info-block p,
+.auth-benefits li,
+.status-block p {
+  margin: 0;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.auth-benefits ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.status-loading {
+  border-color: #dbeafe;
+  background-color: #eff6ff;
+}
+
+.status-success {
+  border-color: #bbf7d0;
+  background-color: #f0fdf4;
+}
+
+.status-error {
+  border-color: #fecaca;
+  background-color: #fef2f2;
+  display: grid;
+  gap: 14px;
+}
+
+.secondary-button {
+  width: fit-content;
+  background-color: #111827;
+  color: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .auth-card {
+    padding: 28px 20px;
+    gap: 20px;
+  }
+
+  .primary-button,
+  .secondary-button {
+    width: 100%;
+  }
+
+  .secondary-button {
+    width: 100%;
+  }
+}
