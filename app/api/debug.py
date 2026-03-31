@@ -15,7 +15,7 @@ async def get_vacancy_responses_raw(vacancy_id: str, request: Request) -> dict[s
         raise HTTPException(status_code=401, detail='Unauthorized')
 
     path = '/negotiations'
-    params = {'vacancy_id': vacancy_id}
+    params = {'vacancy_id': vacancy_id, 'per_page': '50', 'page': '0', 'status': 'any'}
     hh_request_url = str(httpx.URL(f'{HH_API_BASE}{path}', params=params))
 
     async with httpx.AsyncClient(timeout=20.0) as client:

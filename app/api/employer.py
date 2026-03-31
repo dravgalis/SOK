@@ -142,12 +142,13 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
     access_token = _require_access_token(request)
 
     async with httpx.AsyncClient(timeout=20.0) as client:
-        responses = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+        responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+        responses = responses_payload['items']
 
     return {
         'vacancy_id': vacancy_id,
         'items': [_normalize_response(item) for item in responses],
-        'count': len(responses),
+        'count': responses_payload['count'],
     }
 
 
@@ -274,10 +275,11 @@ async def _fetch_paginated_vacancies(
     return all_items
 
 
-async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> list[dict]:
+async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
     page = 0
-    per_page = 100
+    per_page = 50
     all_items: list[dict] = []
+    total_count = 0
 
     while True:
         payload = await _hh_get(
@@ -286,6 +288,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             access_token=access_token,
             params={
                 'vacancy_id': vacancy_id,
+                'status': 'any',
                 'page': str(page),
                 'per_page': str(per_page),
             },
@@ -293,11 +296,21 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         )
 
         if payload.get('_status_code') == 404:
-            return []
+            return {'items': [], 'count': 0}
 
         items = payload.get('items')
         if isinstance(items, list):
             all_items.extend(item for item in items if isinstance(item, dict))
+
+        found = payload.get('found')
+        if isinstance(found, int):
+            total_count = found
+        elif page == 0:
+            counters = payload.get('counters')
+            if isinstance(counters, dict):
+                counters_total = counters.get('total')
+                if isinstance(counters_total, int):
+                    total_count = counters_total
 
         pages = payload.get('pages')
         if not isinstance(pages, int):
@@ -307,7 +320,10 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         if page >= pages:
             break
 
-    return all_items
+    if total_count == 0:
+        total_count = len(all_items)
+
+    return {'items': all_items, 'count': total_count}
 
 
 def _extract_user_name(me_payload: dict) -> str | None:
