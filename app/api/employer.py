@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 import httpx
@@ -8,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter()
 
 HH_API_BASE = 'https://api.hh.ru'
+logger = logging.getLogger(__name__)
 
 
 @router.get('/me')
@@ -36,6 +38,10 @@ async def get_me(request: Request) -> dict[str, str | None]:
         'employer_id': employer_id,
     }
 
+        if employer_id:
+            employer_payload = await _hh_get(client, f'/employers/{employer_id}', access_token=access_token)
+            company_name = employer_payload.get('name') if isinstance(employer_payload.get('name'), str) else None
+            company_logo_url = _extract_logo_url(employer_payload)
 
 @router.get('/vacancies')
 async def get_vacancies(request: Request) -> dict[str, object]:
@@ -44,12 +50,27 @@ async def get_vacancies(request: Request) -> dict[str, object]:
     async with httpx.AsyncClient(timeout=20.0) as client:
         me_payload = await _hh_get(client, '/me', access_token=access_token)
         employer_id = _extract_employer_id(me_payload)
+        manager_id = _extract_manager_id(me_payload)
+
+        logger.info('HH vacancies debug: resolved employer_id=%s manager_id=%s', employer_id, manager_id)
 
         if not employer_id:
             raise HTTPException(status_code=502, detail='Не удалось определить employer_id из профиля HH.')
 
-        active_raw = await _fetch_all_vacancies(client, access_token=access_token, employer_id=employer_id, archived=False)
-        archived_raw = await _fetch_all_vacancies(client, access_token=access_token, employer_id=employer_id, archived=True)
+        active_raw = await _fetch_all_vacancies(
+            client,
+            access_token=access_token,
+            employer_id=employer_id,
+            manager_id=manager_id,
+            archived=False,
+        )
+        archived_raw = await _fetch_all_vacancies(
+            client,
+            access_token=access_token,
+            employer_id=employer_id,
+            manager_id=manager_id,
+            archived=True,
+        )
 
     active = [_normalize_vacancy(vacancy, fallback_status='active') for vacancy in active_raw]
     archived = [_normalize_vacancy(vacancy, fallback_status='archived') for vacancy in archived_raw]
@@ -72,11 +93,16 @@ def _require_access_token(request: Request) -> str:
 
 
 async def _hh_get(client: httpx.AsyncClient, path: str, *, access_token: str, params: dict[str, str] | None = None) -> dict:
+    url = f'{HH_API_BASE}{path}'
+    logger.info('HH request debug: url=%s params=%s', url, params)
+
     response = await client.get(
-        f'{HH_API_BASE}{path}',
+        url,
         headers={'Authorization': f'Bearer {access_token}'},
         params=params,
     )
+
+    logger.info('HH response debug: url=%s status_code=%s', url, response.status_code)
 
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail='Unauthorized')
@@ -98,28 +124,78 @@ async def _fetch_all_vacancies(
     *,
     access_token: str,
     employer_id: str,
+    manager_id: str | None,
     archived: bool,
+) -> list[dict]:
+    status_path = 'archived' if archived else 'active'
+
+    preferred_items = await _fetch_paginated_vacancies(
+        client,
+        access_token=access_token,
+        endpoint=f'/employers/{employer_id}/vacancies/{status_path}',
+        params_builder=lambda page, per_page: {
+            'page': str(page),
+            'per_page': str(per_page),
+        },
+    )
+
+    if preferred_items:
+        return preferred_items
+
+    fallback_items = await _fetch_paginated_vacancies(
+        client,
+        access_token=access_token,
+        endpoint='/vacancies',
+        params_builder=lambda page, per_page: {
+            'employer_id': employer_id,
+            'manager_id': manager_id or '',
+            'archived': 'true' if archived else 'false',
+            'page': str(page),
+            'per_page': str(per_page),
+        },
+    )
+    return fallback_items
+
+
+async def _fetch_paginated_vacancies(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    endpoint: str,
+    params_builder,
 ) -> list[dict]:
     page = 0
     per_page = 100
     all_items: list[dict] = []
 
     while True:
-        payload = await _hh_get(
-            client,
-            '/vacancies',
-            access_token=access_token,
-            params={
-                'employer_id': employer_id,
-                'archived': 'true' if archived else 'false',
-                'page': str(page),
-                'per_page': str(per_page),
-            },
-        )
+        params = params_builder(page, per_page)
+        params = {k: v for k, v in params.items() if v}
+
+        try:
+            payload = await _hh_get(client, endpoint, access_token=access_token, params=params)
+        except HTTPException as exc:
+            logger.warning('HH vacancies debug: endpoint=%s failed status=%s', endpoint, exc.status_code)
+            if page == 0:
+                return []
+            break
 
         items = payload.get('items')
         if isinstance(items, list):
-            all_items.extend(item for item in items if isinstance(item, dict))
+            page_items = [item for item in items if isinstance(item, dict)]
+            all_items.extend(page_items)
+        else:
+            page_items = []
+
+        found = payload.get('found')
+        logger.info(
+            'HH vacancies debug: endpoint=%s page=%s items_len=%s found=%s sample_items=%s',
+            endpoint,
+            page,
+            len(page_items),
+            found,
+            page_items[:2],
+        )
 
         pages = payload.get('pages')
         if not isinstance(pages, int):
@@ -129,6 +205,7 @@ async def _fetch_all_vacancies(
         if page >= pages:
             break
 
+    logger.info('HH vacancies debug: endpoint=%s total_items=%s', endpoint, len(all_items))
     return all_items
 
 
