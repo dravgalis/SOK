@@ -3,20 +3,27 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 
-from app.core.config import get_settings
-from app.services.hh_client import HHClient, HHClientError
-from app.services.hh_oauth import HHOAuthService
+from ..core.config import get_settings
+from ..services.hh_client import HHClient, HHClientError
+from ..services.hh_oauth import HHOAuthService
 
-router = APIRouter(prefix='/auth/hh', tags=['hh-auth'])
+router = APIRouter(prefix='/hh', tags=['hh-auth'])
 
 
 @router.get('/login')
 async def hh_login() -> RedirectResponse:
     settings = get_settings()
-    oauth_service = HHOAuthService(settings)
 
+    if not settings.hh_client_id or not settings.hh_redirect_uri:
+        return _frontend_redirect(
+            settings.frontend_app_url,
+            {'auth': 'error', 'message': 'OAuth конфигурация сервера неполная.'},
+        )
+
+    oauth_service = HHOAuthService(settings)
     state = oauth_service.generate_state()
     authorize_url = await oauth_service.build_authorize_url(state)
+
     return RedirectResponse(url=authorize_url, status_code=307)
 
 
@@ -40,6 +47,12 @@ async def hh_callback(
         return _frontend_redirect(
             settings.frontend_app_url,
             {'auth': 'error', 'message': 'Некорректные параметры OAuth callback.'},
+        )
+
+    if not settings.hh_client_id or not settings.hh_client_secret or not settings.hh_redirect_uri:
+        return _frontend_redirect(
+            settings.frontend_app_url,
+            {'auth': 'error', 'message': 'OAuth конфигурация сервера неполная.'},
         )
 
     hh_client = HHClient(settings)

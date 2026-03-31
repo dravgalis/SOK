@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import Settings
+from ..core.config import Settings
 
 
 class HHClientError(Exception):

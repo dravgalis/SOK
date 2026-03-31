@@ -7,7 +7,7 @@ import json
 import time
 from urllib.parse import urlencode
 
-from app.core.config import Settings
+from ..core.config import Settings
 
 
 class HHOAuthService:

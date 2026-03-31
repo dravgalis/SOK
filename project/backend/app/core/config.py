@@ -12,6 +12,7 @@ load_dotenv(BASE_DIR / '.env')
 class Settings(BaseModel):
     app_name: str = os.getenv('APP_NAME', 'HH SaaS Backend')
     app_env: str = os.getenv('APP_ENV', 'development')
+    app_base_url: str = os.getenv('APP_BASE_URL', 'http://localhost:8000')
 
     hh_client_id: str = os.getenv('HH_CLIENT_ID', '')
     hh_client_secret: str = os.getenv('HH_CLIENT_SECRET', '')
