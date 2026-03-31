@@ -1,11 +1,12 @@
 import httpx
-from fastapi import APIRouter, Cookie, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
 
 
 @router.get('/me')
-async def get_me(access_token: str | None = Cookie(default=None)) -> dict:
+async def get_me(request: Request) -> dict:
+    access_token = request.cookies.get('access_token')
     if not access_token:
         raise HTTPException(status_code=401, detail='Unauthorized')
 
@@ -20,7 +21,8 @@ async def get_me(access_token: str | None = Cookie(default=None)) -> dict:
 
 
 @router.get('/vacancies')
-async def get_vacancies(access_token: str | None = Cookie(default=None)) -> dict:
+async def get_vacancies(request: Request) -> dict:
+    access_token = request.cookies.get('access_token')
     if not access_token:
         raise HTTPException(status_code=401, detail='Unauthorized')
 

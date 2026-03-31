@@ -84,7 +84,7 @@ async def hh_callback(
         value=access_token,
         httponly=True,
         secure=True,
-        samesite='none',
+        samesite='None',
         max_age=int(token_payload.get('expires_in', 3600)),
     )
     return redirect_response
