@@ -77,6 +77,40 @@ class HHClient:
 
         return all_items
 
+
+    async def get_vacancy(self, access_token: str, vacancy_id: str) -> dict[str, Any]:
+        return await self._request('GET', f'{self.API_BASE_URL}/vacancies/{vacancy_id}', access_token=access_token)
+
+    async def get_vacancy_responses(self, access_token: str, vacancy_id: str, *, per_page: int = 100) -> list[dict[str, Any]]:
+        all_items: list[dict[str, Any]] = []
+        page = 0
+
+        while True:
+            payload = await self._request(
+                'GET',
+                f'{self.API_BASE_URL}/negotiations',
+                access_token=access_token,
+                params={
+                    'vacancy_id': str(vacancy_id),
+                    'per_page': str(per_page),
+                    'page': str(page),
+                },
+            )
+
+            items = payload.get('items')
+            pages = payload.get('pages')
+
+            if isinstance(items, list):
+                all_items.extend(item for item in items if isinstance(item, dict))
+
+            if not isinstance(pages, int):
+                break
+
+            page += 1
+            if page >= pages:
+                break
+
+        return all_items
     async def _request(
         self,
         method: str,

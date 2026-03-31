@@ -229,6 +229,72 @@ p {
   margin: 8px 0 0;
 }
 
+.back-link {
+  text-decoration: none;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.vacancy-details-layout {
+  gap: 20px;
+}
+
+.vacancy-details-header {
+  display: grid;
+  gap: 12px;
+}
+
+.vacancy-details-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.vacancy-details-meta span {
+  color: #475569;
+}
+
+.vacancy-description {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  background: #f8fafc;
+}
+
+.vacancy-description p {
+  margin-bottom: 0;
+}
+
+.responses-section {
+  display: grid;
+  gap: 14px;
+}
+
+.responses-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.response-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.response-card span {
+  color: #475569;
+}
+
+.response-card p {
+  margin: 4px 0 0;
+}
+
 @media (max-width: 680px) {
   .page {
     padding: 16px;
