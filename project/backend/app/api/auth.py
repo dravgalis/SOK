@@ -1,16 +1,18 @@
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Cookie, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from ..core.config import get_settings
 from ..services.hh_client import HHClient, HHClientError
 from ..services.hh_oauth import HHOAuthService
 
-router = APIRouter(prefix='/hh', tags=['hh-auth'])
+router = APIRouter(tags=['hh-auth'])
+
+ACCESS_TOKEN_COOKIE = 'hh_access_token'
 
 
-@router.get('/login')
+@router.get('/auth/hh/login')
 async def hh_login() -> RedirectResponse:
     settings = get_settings()
 
@@ -27,7 +29,7 @@ async def hh_login() -> RedirectResponse:
     return RedirectResponse(url=authorize_url, status_code=307)
 
 
-@router.get('/callback')
+@router.get('/auth/hh/callback')
 async def hh_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
@@ -58,14 +60,89 @@ async def hh_callback(
     hh_client = HHClient(settings)
 
     try:
-        await hh_client.exchange_code(code)
+        access_token = await hh_client.exchange_code(code)
     except HHClientError as exc:
         return _frontend_redirect(
             settings.frontend_app_url,
             {'auth': 'error', 'message': str(exc)},
         )
 
-    return _frontend_redirect(settings.frontend_app_url, {'auth': 'success'})
+    response = RedirectResponse(url=f"{settings.frontend_app_url.rstrip('/')}/app", status_code=307)
+    response.set_cookie(
+        key=ACCESS_TOKEN_COOKIE,
+        value=access_token,
+        httponly=True,
+        samesite='lax',
+        secure=settings.cookie_secure,
+        path='/',
+        max_age=3600,
+    )
+    return response
+
+
+@router.get('/me')
+async def get_me(access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE)) -> dict[str, str | None]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        payload = await hh_client.get_current_user(token)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    photo = payload.get('photo')
+    avatar = photo.get('90') if isinstance(photo, dict) else None
+
+    full_name = ' '.join(part for part in [payload.get('first_name'), payload.get('last_name')] if isinstance(part, str) and part)
+    if not full_name:
+        full_name = str(payload.get('name', ''))
+
+    email = payload.get('email') if isinstance(payload.get('email'), str) else None
+
+    return {
+        'id': str(payload.get('id', '')),
+        'name': full_name,
+        'avatar': avatar,
+        'email': email,
+    }
+
+
+@router.get('/vacancies')
+async def get_vacancies(access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE)) -> dict[str, list[dict[str, str | None]]]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        payload = await hh_client.get_vacancies(token, per_page=20)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    items = payload.get('items') if isinstance(payload.get('items'), list) else []
+    vacancies: list[dict[str, str | None]] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        status_data = item.get('type')
+        status = status_data.get('name') if isinstance(status_data, dict) else None
+
+        vacancies.append(
+            {
+                'id': str(item.get('id', '')),
+                'name': str(item.get('name', '')),
+                'status': status,
+                'published_at': str(item.get('published_at')) if item.get('published_at') else None,
+            }
+        )
+
+    return {'items': vacancies}
+
+
+def _require_access_token(access_token: str | None) -> str:
+    if not access_token:
+        raise HTTPException(status_code=401, detail='Требуется авторизация через HeadHunter.')
+    return access_token
 
 
 def _frontend_redirect(base_url: str, params: dict[str, str]) -> RedirectResponse:

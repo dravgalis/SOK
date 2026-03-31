@@ -21,4 +21,4 @@ async def healthcheck() -> dict:
     return {'status': 'ok'}
 
 
-app.include_router(hh_auth_router, prefix='/api/auth')
+app.include_router(hh_auth_router, prefix='/api')

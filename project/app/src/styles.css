@@ -21,7 +21,7 @@ body {
 }
 
 .card {
-  width: min(420px, 100%);
+  width: min(720px, 100%);
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
@@ -47,12 +47,6 @@ p {
   font-size: 0.95rem;
 }
 
-.status-success {
-  background: #ecfdf3;
-  border: 1px solid #86efac;
-  color: #14532d;
-}
-
 .status-error {
   background: #fef2f2;
   border: 1px solid #fca5a5;
@@ -73,4 +67,56 @@ p {
 .cta-button:disabled {
   opacity: 0.7;
   cursor: not-allowed;
+}
+
+.dashboard-card {
+  display: grid;
+  gap: 24px;
+}
+
+.profile-header {
+  text-align: center;
+}
+
+.profile-header p {
+  margin: 8px 0 0;
+}
+
+.avatar {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #e2e8f0;
+}
+
+.avatar-fallback {
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111827;
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.vacancies-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.vacancy-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.vacancy-item span {
+  color: #475569;
 }
