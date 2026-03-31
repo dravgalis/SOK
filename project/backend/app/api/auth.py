@@ -226,16 +226,20 @@ async def get_vacancy_responses(
     hh_client = HHClient(get_settings())
 
     try:
-        response_items = await hh_client.get_vacancy_responses(token, vacancy_id)
+        response_result = await hh_client.get_vacancy_responses_with_debug(token, vacancy_id)
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    response_items = response_result.get('items') if isinstance(response_result.get('items'), list) else []
     responses = [_map_response(item) for item in response_items]
-    return {
+    payload: dict[str, object] = {
         'vacancy_id': vacancy_id,
         'items': responses,
         'count': len(responses),
     }
+    if not responses:
+        payload['debug'] = response_result.get('debug')
+    return payload
 
 
 def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict[str, object] | None:
@@ -259,22 +263,53 @@ def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object
 
 
 def _map_response(item: dict[str, object]) -> dict[str, object]:
-    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
-    applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
+    resume = _extract_first_dict(item, ('resume', 'resume_info', 'cv'))
+    applicant = _extract_first_dict(item, ('applicant', 'user', 'candidate'))
     salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
     status = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
+    candidate_name = (
+        applicant.get('full_name')
+        or applicant.get('name')
+        or _extract_nested_value(item, ('resume', 'owner', 'name'))
+        or _extract_nested_value(item, ('resume', 'first_name'))
+    )
+    cover_letter = (
+        item.get('cover_letter')
+        or item.get('message')
+        or _extract_nested_value(item, ('topic', 'body'))
+        or _extract_nested_value(item, ('chat', 'message'))
+    )
+    created_at = item.get('created_at') or item.get('updated_at') or item.get('date')
+    response_id = item.get('id') or item.get('response_id') or _extract_nested_value(item, ('topic', 'id'))
 
     return {
-        'response_id': _as_string(item.get('id')),
-        'candidate_name': _as_string_or_none(applicant.get('full_name') or applicant.get('name')),
+        'response_id': _as_string(response_id),
+        'candidate_name': _as_string_or_none(candidate_name),
         'resume_title': _as_string_or_none(resume.get('title')),
         'expected_salary': _format_salary(salary),
         'location': _as_string_or_none(area.get('name')),
-        'response_created_at': _as_string_or_none(item.get('created_at')),
-        'cover_letter': _as_string_or_none(item.get('cover_letter') or item.get('message')),
+        'response_created_at': _as_string_or_none(created_at),
+        'cover_letter': _as_string_or_none(cover_letter),
         'status': _as_string_or_none(status.get('name') or status.get('id')),
     }
+
+
+def _extract_first_dict(item: dict[str, object], keys: tuple[str, ...]) -> dict[str, object]:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, dict):
+            return value
+    return {}
+
+
+def _extract_nested_value(item: dict[str, object], path: tuple[str, ...]) -> object | None:
+    current: object = item
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
 
 
 def _format_salary(salary: dict[str, object]) -> str | None:
