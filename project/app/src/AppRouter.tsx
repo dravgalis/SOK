@@ -1,20 +1,16 @@
-import { useEffect, useState } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { APP_ROUTES } from './config';
-import { AppPage } from './pages/AppPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 
 export function AppRouter() {
-  const [path, setPath] = useState(() => window.location.pathname);
-
-  useEffect(() => {
-    const onPopState = () => setPath(window.location.pathname);
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  if (path === APP_ROUTES.app) {
-    return <AppPage />;
-  }
-
-  return <LoginPage />;
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path={APP_ROUTES.login} element={<LoginPage />} />
+        <Route path={APP_ROUTES.app} element={<DashboardPage />} />
+        <Route path="*" element={<Navigate to={APP_ROUTES.login} replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
 }
