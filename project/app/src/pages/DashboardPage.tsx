@@ -7,6 +7,8 @@ type Me = {
   last_name?: string | null;
   name?: string | null;
   avatar_url?: string | null;
+  company_name?: string | null;
+  company_logo_url?: string | null;
 };
 
 type Vacancy = {
@@ -14,35 +16,27 @@ type Vacancy = {
   name: string;
   status?: string | null;
   published_at?: string | null;
-  archived?: boolean;
+  archived_at?: string | null;
 };
 
-type VacancyTabKey = 'active' | 'drafts' | 'archived' | 'templates';
+type VacancyTabKey = 'active' | 'archived';
 
 type VacanciesPayload = {
   active: Vacancy[];
   archived: Vacancy[];
-  drafts: Vacancy[];
-  templates: Vacancy[];
   counts: Record<VacancyTabKey, number>;
 };
 
 const TAB_ITEMS: { key: VacancyTabKey; label: string }[] = [
   { key: 'active', label: 'Активные' },
-  { key: 'drafts', label: 'Черновики' },
   { key: 'archived', label: 'Архив' },
-  { key: 'templates', label: 'Шаблоны' },
 ];
 
-function formatPublishedAt(value?: string | null): string {
-  if (!value) {
-    return '—';
-  }
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
+  if (Number.isNaN(date.getTime())) return value;
 
   return new Intl.DateTimeFormat('ru-RU', {
     day: '2-digit',
@@ -51,16 +45,16 @@ function formatPublishedAt(value?: string | null): string {
   }).format(date);
 }
 
-function getVacancyStatus(tab: VacancyTabKey, status?: string | null): string {
-  if (status) {
-    return status;
+function getVacancyMetaDate(tab: VacancyTabKey, vacancy: Vacancy): string {
+  if (tab === 'archived') {
+    return formatDate(vacancy.archived_at || vacancy.published_at);
   }
 
-  if (tab === 'active') return 'Активна';
-  if (tab === 'archived') return 'В архиве';
-  if (tab === 'drafts') return 'Черновик';
-  if (tab === 'templates') return 'Шаблон';
-  return '—';
+  return formatDate(vacancy.published_at);
+}
+
+function getVacancyMetaLabel(tab: VacancyTabKey): string {
+  return tab === 'archived' ? 'Дата архивирования' : 'Дата публикации';
 }
 
 export function DashboardPage() {
@@ -68,14 +62,10 @@ export function DashboardPage() {
   const [vacanciesByTab, setVacanciesByTab] = useState<Record<VacancyTabKey, Vacancy[]>>({
     active: [],
     archived: [],
-    drafts: [],
-    templates: [],
   });
   const [counts, setCounts] = useState<Record<VacancyTabKey, number>>({
     active: 0,
     archived: 0,
-    drafts: 0,
-    templates: 0,
   });
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
   const [loading, setLoading] = useState(true);
@@ -107,14 +97,10 @@ export function DashboardPage() {
         setVacanciesByTab({
           active: vacanciesPayload.active || [],
           archived: vacanciesPayload.archived || [],
-          drafts: vacanciesPayload.drafts || [],
-          templates: vacanciesPayload.templates || [],
         });
         setCounts({
           active: vacanciesPayload.counts?.active ?? vacanciesPayload.active?.length ?? 0,
           archived: vacanciesPayload.counts?.archived ?? vacanciesPayload.archived?.length ?? 0,
-          drafts: vacanciesPayload.counts?.drafts ?? vacanciesPayload.drafts?.length ?? 0,
-          templates: vacanciesPayload.counts?.templates ?? vacanciesPayload.templates?.length ?? 0,
         });
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
@@ -146,18 +132,22 @@ export function DashboardPage() {
     );
   }
 
-  const displayName = me?.name || [me?.first_name, me?.last_name].filter(Boolean).join(' ') || 'Работодатель';
+  const companyName = me?.company_name || 'Компания';
 
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
-        <div className="profile-header profile-header-row">
-          {me?.avatar_url ? (
-            <img src={me.avatar_url} alt={displayName} className="avatar" />
+        <div className="profile-header-company">
+          {me?.company_logo_url ? (
+            <img src={me.company_logo_url} alt={companyName} className="avatar avatar-company" />
           ) : (
-            <div className="avatar avatar-fallback">{displayName.slice(0, 1).toUpperCase()}</div>
+            <div className="avatar avatar-fallback avatar-company">{companyName.slice(0, 1).toUpperCase()}</div>
           )}
-          <h1>{displayName}</h1>
+
+          <div className="profile-header-content">
+            <p className="profile-header-label">Работодатель</p>
+            <h1>{companyName}</h1>
+          </div>
         </div>
 
         <div className="vacancies-section">
@@ -194,8 +184,10 @@ export function DashboardPage() {
                     className="vacancy-link"
                   >
                     <strong>{vacancy.name}</strong>
-                    <span>Дата публикации: {formatPublishedAt(vacancy.published_at)}</span>
-                    <span>Статус: {getVacancyStatus(activeTab, vacancy.status)}</span>
+                    <span>
+                      {getVacancyMetaLabel(activeTab)}: {getVacancyMetaDate(activeTab, vacancy)}
+                    </span>
+                    <span>Статус: {vacancy.status || '—'}</span>
                     <span>ID: {vacancy.id}</span>
                   </a>
                 </li>
