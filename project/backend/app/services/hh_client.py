@@ -37,13 +37,45 @@ class HHClient:
     async def get_current_user(self, access_token: str) -> dict[str, Any]:
         return await self._request('GET', f'{self.API_BASE_URL}/me', access_token=access_token)
 
-    async def get_vacancies(self, access_token: str, per_page: int = 20) -> dict[str, Any]:
-        return await self._request(
-            'GET',
-            f'{self.API_BASE_URL}/vacancies',
-            access_token=access_token,
-            params={'per_page': str(per_page)},
-        )
+    async def get_employer(self, access_token: str, employer_id: str) -> dict[str, Any]:
+        return await self._request('GET', f'{self.API_BASE_URL}/employers/{employer_id}', access_token=access_token)
+
+    async def get_vacancies(
+        self,
+        access_token: str,
+        *,
+        per_page: int = 100,
+        archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        all_items: list[dict[str, Any]] = []
+        page = 0
+
+        while True:
+            payload = await self._request(
+                'GET',
+                f'{self.API_BASE_URL}/vacancies',
+                access_token=access_token,
+                params={
+                    'per_page': str(per_page),
+                    'page': str(page),
+                    'archived': 'true' if archived else 'false',
+                },
+            )
+
+            items = payload.get('items')
+            pages = payload.get('pages')
+
+            if isinstance(items, list):
+                all_items.extend(item for item in items if isinstance(item, dict))
+
+            if not isinstance(pages, int):
+                break
+
+            page += 1
+            if page >= pages:
+                break
+
+        return all_items
 
     async def _request(
         self,
