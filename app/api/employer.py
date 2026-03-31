@@ -38,6 +38,10 @@ async def get_me(request: Request) -> dict[str, str | None]:
         'employer_id': employer_id,
     }
 
+        if employer_id:
+            employer_payload = await _hh_get(client, f'/employers/{employer_id}', access_token=access_token)
+            company_name = employer_payload.get('name') if isinstance(employer_payload.get('name'), str) else None
+            company_logo_url = _extract_logo_url(employer_payload)
 
 @router.get('/vacancies')
 async def get_vacancies(request: Request) -> dict[str, object]:
