@@ -50,4 +50,22 @@ async def get_vacancies(request: Request) -> dict:
         raise HTTPException(status_code=401, detail='Unauthorized')
 
     vacancies_response.raise_for_status()
-    return vacancies_response.json()
+
+    items = vacancies_response.json().get('items', [])
+    active = [vacancy for vacancy in items if not vacancy.get('archived', False)]
+    archived = [vacancy for vacancy in items if vacancy.get('archived', False)]
+    drafts: list[dict] = []
+    templates: list[dict] = []
+
+    return {
+        'active': active,
+        'archived': archived,
+        'drafts': drafts,
+        'templates': templates,
+        'counts': {
+            'active': len(active),
+            'archived': len(archived),
+            'drafts': len(drafts),
+            'templates': len(templates),
+        },
+    }
