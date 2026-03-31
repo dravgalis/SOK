@@ -38,6 +38,7 @@ async def get_me(request: Request) -> dict[str, str | None]:
         'employer_id': employer_id,
     }
 
+
 @router.get('/vacancies')
 async def get_vacancies(request: Request) -> dict[str, object]:
     access_token = _require_access_token(request)
@@ -67,8 +68,8 @@ async def get_vacancies(request: Request) -> dict[str, object]:
             archived=True,
         )
 
-    active = [_normalize_vacancy(vacancy, fallback_status='active') for vacancy in active_raw]
-    archived = [_normalize_vacancy(vacancy, fallback_status='archived') for vacancy in archived_raw]
+    active = [_normalize_vacancy(vacancy, archived=False) for vacancy in active_raw]
+    archived = [_normalize_vacancy(vacancy, archived=True) for vacancy in archived_raw]
 
     return {
         'active': active,
@@ -80,6 +81,76 @@ async def get_vacancies(request: Request) -> dict[str, object]:
     }
 
 
+@router.get('/vacancies/{vacancy_id}')
+async def get_vacancy_by_id(vacancy_id: str, request: Request) -> dict[str, object]:
+    access_token = _require_access_token(request)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        me_payload = await _hh_get(client, '/me', access_token=access_token)
+        employer_id = _extract_employer_id(me_payload)
+        manager_id = _extract_manager_id(me_payload)
+
+        if not employer_id:
+            raise HTTPException(status_code=502, detail='Не удалось определить employer_id из профиля HH.')
+
+        active_raw = await _fetch_all_vacancies(
+            client,
+            access_token=access_token,
+            employer_id=employer_id,
+            manager_id=manager_id,
+            archived=False,
+        )
+        archived_raw = await _fetch_all_vacancies(
+            client,
+            access_token=access_token,
+            employer_id=employer_id,
+            manager_id=manager_id,
+            archived=True,
+        )
+
+    for vacancy in active_raw:
+        if str(vacancy.get('id', '')) == vacancy_id:
+            normalized = _normalize_vacancy(vacancy, archived=False)
+            return {
+                'id': normalized['id'],
+                'name': normalized['name'],
+                'normalized_status': normalized['normalized_status'],
+                'published_at': normalized['published_at'],
+                'archived_at': normalized['archived_at'],
+                'responses_count': normalized['responses_count'],
+                'description': None,
+            }
+
+    for vacancy in archived_raw:
+        if str(vacancy.get('id', '')) == vacancy_id:
+            normalized = _normalize_vacancy(vacancy, archived=True)
+            return {
+                'id': normalized['id'],
+                'name': normalized['name'],
+                'normalized_status': normalized['normalized_status'],
+                'published_at': normalized['published_at'],
+                'archived_at': normalized['archived_at'],
+                'responses_count': normalized['responses_count'],
+                'description': None,
+            }
+
+    raise HTTPException(status_code=404, detail='Вакансия не найдена.')
+
+
+@router.get('/vacancies/{vacancy_id}/responses')
+async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, object]:
+    access_token = _require_access_token(request)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        responses = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+
+    return {
+        'vacancy_id': vacancy_id,
+        'items': [_normalize_response(item) for item in responses],
+        'count': len(responses),
+    }
+
+
 def _require_access_token(request: Request) -> str:
     access_token = request.cookies.get('access_token')
     if not access_token:
@@ -87,7 +158,14 @@ def _require_access_token(request: Request) -> str:
     return access_token
 
 
-async def _hh_get(client: httpx.AsyncClient, path: str, *, access_token: str, params: dict[str, str] | None = None) -> dict:
+async def _hh_get(
+    client: httpx.AsyncClient,
+    path: str,
+    *,
+    access_token: str,
+    params: dict[str, str] | None = None,
+    allow_404: bool = False,
+) -> dict:
     url = f'{HH_API_BASE}{path}'
     logger.info('HH request debug: url=%s params=%s', url, params)
 
@@ -101,6 +179,9 @@ async def _hh_get(client: httpx.AsyncClient, path: str, *, access_token: str, pa
 
     if response.status_code == 401:
         raise HTTPException(status_code=401, detail='Unauthorized')
+
+    if allow_404 and response.status_code == 404:
+        return {'_status_code': 404}
 
     try:
         response.raise_for_status()
@@ -182,15 +263,41 @@ async def _fetch_paginated_vacancies(
         else:
             page_items = []
 
-        found = payload.get('found')
-        logger.info(
-            'HH vacancies debug: endpoint=%s page=%s items_len=%s found=%s sample_items=%s',
-            endpoint,
-            page,
-            len(page_items),
-            found,
-            page_items[:2],
+        pages = payload.get('pages')
+        if not isinstance(pages, int):
+            break
+
+        page += 1
+        if page >= pages:
+            break
+
+    return all_items
+
+
+async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> list[dict]:
+    page = 0
+    per_page = 100
+    all_items: list[dict] = []
+
+    while True:
+        payload = await _hh_get(
+            client,
+            '/negotiations',
+            access_token=access_token,
+            params={
+                'vacancy_id': vacancy_id,
+                'page': str(page),
+                'per_page': str(per_page),
+            },
+            allow_404=True,
         )
+
+        if payload.get('_status_code') == 404:
+            return []
+
+        items = payload.get('items')
+        if isinstance(items, list):
+            all_items.extend(item for item in items if isinstance(item, dict))
 
         pages = payload.get('pages')
         if not isinstance(pages, int):
@@ -200,7 +307,6 @@ async def _fetch_paginated_vacancies(
         if page >= pages:
             break
 
-    logger.info('HH vacancies debug: endpoint=%s total_items=%s', endpoint, len(all_items))
     return all_items
 
 
@@ -253,21 +359,59 @@ def _extract_logo_url(employer_payload: dict) -> str | None:
     return None
 
 
-def _normalize_vacancy(vacancy: dict, *, fallback_status: str) -> dict[str, str | None]:
-    status_name: str | None = None
-
-    vacancy_status = vacancy.get('status')
-    vacancy_type = vacancy.get('type')
-
-    if isinstance(vacancy_status, dict) and isinstance(vacancy_status.get('name'), str):
-        status_name = vacancy_status.get('name')
-    elif isinstance(vacancy_type, dict) and isinstance(vacancy_type.get('name'), str):
-        status_name = vacancy_type.get('name')
-
+def _normalize_vacancy(vacancy: dict, *, archived: bool) -> dict[str, object]:
     return {
         'id': str(vacancy.get('id', '')),
         'name': str(vacancy.get('name', '')),
-        'status': status_name or fallback_status,
+        'normalized_status': 'Архивная' if archived else 'Активная',
         'published_at': str(vacancy.get('published_at')) if vacancy.get('published_at') else None,
         'archived_at': str(vacancy.get('archived_at')) if vacancy.get('archived_at') else None,
+        'responses_count': _extract_responses_count(vacancy),
+    }
+
+
+def _extract_responses_count(vacancy: dict) -> int:
+    counters = vacancy.get('counters')
+    if isinstance(counters, dict):
+        for key in ('responses', 'new_responses', 'all_responses'):
+            value = counters.get(key)
+            if isinstance(value, int):
+                return value
+
+    for key in ('responses_count', 'response_count', 'responses'):
+        value = vacancy.get(key)
+        if isinstance(value, int):
+            return value
+
+    return 0
+
+
+def _normalize_response(item: dict) -> dict[str, object | None]:
+    applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
+    state = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
+
+    amount = salary.get('amount') or salary.get('from') or salary.get('to')
+    currency = salary.get('currency') if isinstance(salary.get('currency'), str) else None
+
+    expected_salary: str | None = None
+    if isinstance(amount, (int, float)):
+        expected_salary = str(int(amount))
+    elif isinstance(amount, str):
+        expected_salary = amount
+    if expected_salary and currency:
+        expected_salary = f'{expected_salary} {currency}'
+
+    area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
+
+    return {
+        'response_id': str(item.get('id', '')),
+        'candidate_name': applicant.get('full_name') if isinstance(applicant.get('full_name'), str) else applicant.get('name') if isinstance(applicant.get('name'), str) else None,
+        'resume_title': resume.get('title') if isinstance(resume.get('title'), str) else None,
+        'expected_salary': expected_salary,
+        'location': area.get('name') if isinstance(area.get('name'), str) else None,
+        'response_created_at': str(item.get('created_at')) if item.get('created_at') else None,
+        'cover_letter': item.get('cover_letter') if isinstance(item.get('cover_letter'), str) else item.get('message') if isinstance(item.get('message'), str) else None,
+        'status': state.get('name') if isinstance(state.get('name'), str) else state.get('id') if isinstance(state.get('id'), str) else None,
     }

@@ -161,8 +161,8 @@ async def get_vacancies(access_token: str | None = Cookie(default=None, alias=AC
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    active_vacancies = [_map_vacancy(item, fallback_status='Активна') for item in active_items]
-    archived_vacancies = [_map_vacancy(item, fallback_status='В архиве') for item in archived_items]
+    active_vacancies = [_map_vacancy(item, archived=False) for item in active_items]
+    archived_vacancies = [_map_vacancy(item, archived=True) for item in archived_items]
 
     return {
         'active': active_vacancies,
@@ -174,26 +174,155 @@ async def get_vacancies(access_token: str | None = Cookie(default=None, alias=AC
     }
 
 
-def _map_vacancy(item: dict[str, object], *, fallback_status: str) -> dict[str, str | None]:
-    name_raw = item.get('name')
-    status_raw = item.get('status')
-    type_raw = item.get('type')
-    published_at_raw = item.get('published_at')
-    archived_at_raw = item.get('archived_at')
+@router.get('/vacancies/{vacancy_id}')
+async def get_vacancy_details(
+    vacancy_id: str,
+    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
+) -> dict[str, object]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
 
-    status: str | None = None
-    if isinstance(status_raw, dict) and isinstance(status_raw.get('name'), str):
-        status = status_raw.get('name')
-    elif isinstance(type_raw, dict) and isinstance(type_raw.get('name'), str):
-        status = type_raw.get('name')
+    try:
+        active_items = await hh_client.get_vacancies(token, per_page=100, archived=False)
+        archived_items = await hh_client.get_vacancies(token, per_page=100, archived=True)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    found_active = _find_vacancy_by_id(active_items, vacancy_id)
+    if found_active is not None:
+        mapped = _map_vacancy(found_active, archived=False)
+        return {
+            'id': mapped['id'],
+            'name': mapped['name'],
+            'normalized_status': mapped['normalized_status'],
+            'published_at': mapped['published_at'],
+            'archived_at': mapped['archived_at'],
+            'responses_count': mapped['responses_count'],
+            'description': None,
+        }
+
+    found_archived = _find_vacancy_by_id(archived_items, vacancy_id)
+    if found_archived is not None:
+        mapped = _map_vacancy(found_archived, archived=True)
+        return {
+            'id': mapped['id'],
+            'name': mapped['name'],
+            'normalized_status': mapped['normalized_status'],
+            'published_at': mapped['published_at'],
+            'archived_at': mapped['archived_at'],
+            'responses_count': mapped['responses_count'],
+            'description': None,
+        }
+
+    raise HTTPException(status_code=404, detail='Вакансия не найдена.')
+
+
+@router.get('/vacancies/{vacancy_id}/responses')
+async def get_vacancy_responses(
+    vacancy_id: str,
+    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
+) -> dict[str, object]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        response_items = await hh_client.get_vacancy_responses(token, vacancy_id)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    responses = [_map_response(item) for item in response_items]
+    return {
+        'vacancy_id': vacancy_id,
+        'items': responses,
+        'count': len(responses),
+    }
+
+
+def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict[str, object] | None:
+    for item in items:
+        if str(item.get('id', '')) == vacancy_id:
+            return item
+    return None
+
+
+def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object]:
     return {
         'id': str(item.get('id', '')),
-        'name': str(name_raw) if name_raw is not None else '',
-        'status': status or fallback_status,
-        'published_at': str(published_at_raw) if published_at_raw else None,
-        'archived_at': str(archived_at_raw) if archived_at_raw else None,
+        'name': _as_string(item.get('name')),
+        'status': _normalize_status(archived),
+        'normalized_status': _normalize_status(archived),
+        'archived': archived,
+        'published_at': _as_string_or_none(item.get('published_at')),
+        'archived_at': _as_string_or_none(item.get('archived_at')),
+        'responses_count': _extract_responses_count(item),
     }
+
+
+def _map_response(item: dict[str, object]) -> dict[str, object]:
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
+    salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
+    area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
+    status = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
+
+    return {
+        'response_id': _as_string(item.get('id')),
+        'candidate_name': _as_string_or_none(applicant.get('full_name') or applicant.get('name')),
+        'resume_title': _as_string_or_none(resume.get('title')),
+        'expected_salary': _format_salary(salary),
+        'location': _as_string_or_none(area.get('name')),
+        'response_created_at': _as_string_or_none(item.get('created_at')),
+        'cover_letter': _as_string_or_none(item.get('cover_letter') or item.get('message')),
+        'status': _as_string_or_none(status.get('name') or status.get('id')),
+    }
+
+
+def _format_salary(salary: dict[str, object]) -> str | None:
+    amount_raw = salary.get('amount') or salary.get('from') or salary.get('to')
+    currency_raw = salary.get('currency')
+
+    amount: str | None = None
+    if isinstance(amount_raw, (int, float)):
+        amount = str(int(amount_raw))
+    elif isinstance(amount_raw, str):
+        amount = amount_raw
+
+    currency = currency_raw if isinstance(currency_raw, str) else None
+
+    if amount and currency:
+        return f'{amount} {currency}'
+
+    return amount
+
+
+def _extract_responses_count(item: dict[str, object]) -> int:
+    counters = item.get('counters')
+    if isinstance(counters, dict):
+        for key in ('responses', 'new_responses', 'all_responses'):
+            value = counters.get(key)
+            if isinstance(value, int):
+                return value
+
+    for key in ('responses_count', 'response_count', 'responses'):
+        value = item.get(key)
+        if isinstance(value, int):
+            return value
+
+    return 0
+
+
+def _normalize_status(archived: bool) -> str:
+    return 'Архивная' if archived else 'Активная'
+
+
+def _as_string(value: object) -> str:
+    return str(value) if value is not None else ''
+
+
+def _as_string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _require_access_token(access_token: str | None) -> str:
