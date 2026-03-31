@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 import os
+from typing import Literal
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -18,10 +19,12 @@ class Settings(BaseModel):
     hh_client_secret: str = os.getenv('HH_CLIENT_SECRET', '')
     hh_redirect_uri: str = os.getenv('HH_REDIRECT_URI', 'http://localhost:8000/api/auth/hh/callback')
 
-    frontend_app_url: str = os.getenv('FRONTEND_APP_URL', 'http://localhost:5173')
+    frontend_app_url: str = os.getenv('FRONTEND_APP_URL', 'https://sok-app.onrender.com')
     app_secret_key: str = os.getenv('APP_SECRET_KEY', 'change-me-in-production')
+    cookie_secure: bool = os.getenv('COOKIE_SECURE', 'true').lower() == 'true'
+    cookie_samesite: Literal['lax', 'strict', 'none'] = os.getenv('COOKIE_SAMESITE', 'none').lower()  # type: ignore[assignment]
 
-    cors_origins_raw: str = os.getenv('CORS_ORIGINS', 'http://localhost:5173')
+    cors_origins_raw: str = os.getenv('CORS_ORIGINS', 'http://localhost:5173,https://sok-app.onrender.com')
 
     @property
     def cors_origins(self) -> list[str]:
