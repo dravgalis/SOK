@@ -72,7 +72,7 @@ async def hh_callback(
         key=ACCESS_TOKEN_COOKIE,
         value=access_token,
         httponly=True,
-        samesite='lax',
+        samesite=settings.cookie_samesite,
         secure=settings.cookie_secure,
         path='/',
         max_age=3600,
@@ -91,19 +91,18 @@ async def get_me(access_token: str | None = Cookie(default=None, alias=ACCESS_TO
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     photo = payload.get('photo')
-    avatar = photo.get('90') if isinstance(photo, dict) else None
+    avatar_url = photo.get('90') if isinstance(photo, dict) else None
 
-    full_name = ' '.join(part for part in [payload.get('first_name'), payload.get('last_name')] if isinstance(part, str) and part)
-    if not full_name:
-        full_name = str(payload.get('name', ''))
-
-    email = payload.get('email') if isinstance(payload.get('email'), str) else None
+    first_name = payload.get('first_name') if isinstance(payload.get('first_name'), str) else None
+    last_name = payload.get('last_name') if isinstance(payload.get('last_name'), str) else None
+    name = payload.get('name') if isinstance(payload.get('name'), str) else None
 
     return {
         'id': str(payload.get('id', '')),
-        'name': full_name,
-        'avatar': avatar,
-        'email': email,
+        'first_name': first_name,
+        'last_name': last_name,
+        'name': name or ' '.join(part for part in [first_name, last_name] if part),
+        'avatar_url': avatar_url,
     }
 
 
