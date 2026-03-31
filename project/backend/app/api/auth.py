@@ -97,45 +97,103 @@ async def get_me(access_token: str | None = Cookie(default=None, alias=ACCESS_TO
     last_name = payload.get('last_name') if isinstance(payload.get('last_name'), str) else None
     name = payload.get('name') if isinstance(payload.get('name'), str) else None
 
+    company_name: str | None = None
+    company_logo_url: str | None = None
+
+    employer_data = payload.get('employer')
+    if isinstance(employer_data, dict):
+        employer_name = employer_data.get('name')
+        company_name = employer_name if isinstance(employer_name, str) else None
+
+        logo_urls = employer_data.get('logo_urls')
+        if isinstance(logo_urls, dict):
+            company_logo_url = (
+                logo_urls.get('original')
+                if isinstance(logo_urls.get('original'), str)
+                else logo_urls.get('240')
+                if isinstance(logo_urls.get('240'), str)
+                else logo_urls.get('90')
+                if isinstance(logo_urls.get('90'), str)
+                else None
+            )
+
+        employer_id = employer_data.get('id')
+        if isinstance(employer_id, (str, int)) and (not company_name or not company_logo_url):
+            try:
+                employer_payload = await hh_client.get_employer(token, str(employer_id))
+            except HHClientError:
+                employer_payload = {}
+
+            if not company_name and isinstance(employer_payload.get('name'), str):
+                company_name = employer_payload.get('name')
+
+            employer_logo_urls = employer_payload.get('logo_urls')
+            if not company_logo_url and isinstance(employer_logo_urls, dict):
+                company_logo_url = (
+                    employer_logo_urls.get('original')
+                    if isinstance(employer_logo_urls.get('original'), str)
+                    else employer_logo_urls.get('240')
+                    if isinstance(employer_logo_urls.get('240'), str)
+                    else employer_logo_urls.get('90')
+                    if isinstance(employer_logo_urls.get('90'), str)
+                    else None
+                )
+
     return {
         'id': str(payload.get('id', '')),
         'first_name': first_name,
         'last_name': last_name,
         'name': name or ' '.join(part for part in [first_name, last_name] if part),
         'avatar_url': avatar_url,
+        'company_name': company_name,
+        'company_logo_url': company_logo_url,
     }
 
 
 @router.get('/vacancies')
-async def get_vacancies(access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE)) -> dict[str, list[dict[str, str | None]]]:
+async def get_vacancies(access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE)) -> dict[str, object]:
     token = _require_access_token(access_token)
     hh_client = HHClient(get_settings())
 
     try:
-        payload = await hh_client.get_vacancies(token, per_page=20)
+        active_items = await hh_client.get_vacancies(token, per_page=100, archived=False)
+        archived_items = await hh_client.get_vacancies(token, per_page=100, archived=True)
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    items = payload.get('items') if isinstance(payload.get('items'), list) else []
-    vacancies: list[dict[str, str | None]] = []
+    active_vacancies = [_map_vacancy(item, fallback_status='Активна') for item in active_items]
+    archived_vacancies = [_map_vacancy(item, fallback_status='В архиве') for item in archived_items]
 
-    for item in items:
-        if not isinstance(item, dict):
-            continue
+    return {
+        'active': active_vacancies,
+        'archived': archived_vacancies,
+        'counts': {
+            'active': len(active_vacancies),
+            'archived': len(archived_vacancies),
+        },
+    }
 
-        status_data = item.get('type')
-        status = status_data.get('name') if isinstance(status_data, dict) else None
 
-        vacancies.append(
-            {
-                'id': str(item.get('id', '')),
-                'name': str(item.get('name', '')),
-                'status': status,
-                'published_at': str(item.get('published_at')) if item.get('published_at') else None,
-            }
-        )
+def _map_vacancy(item: dict[str, object], *, fallback_status: str) -> dict[str, str | None]:
+    name_raw = item.get('name')
+    status_raw = item.get('status')
+    type_raw = item.get('type')
+    published_at_raw = item.get('published_at')
+    archived_at_raw = item.get('archived_at')
 
-    return {'items': vacancies}
+    status: str | None = None
+    if isinstance(status_raw, dict) and isinstance(status_raw.get('name'), str):
+        status = status_raw.get('name')
+    elif isinstance(type_raw, dict) and isinstance(type_raw.get('name'), str):
+        status = type_raw.get('name')
+
+    return {
+        'id': str(item.get('id', '')),
+        'name': str(name_raw) if name_raw is not None else '',
+        'status': status or fallback_status,
+        'published_at': str(published_at_raw) if published_at_raw else None,
+        'archived_at': str(archived_at_raw) if archived_at_raw else None,
+    }
 
 
 def _require_access_token(access_token: str | None) -> str:
