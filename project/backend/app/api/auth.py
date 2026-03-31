@@ -183,13 +183,69 @@ async def get_vacancy_details(
     hh_client = HHClient(get_settings())
 
     try:
-        vacancy_item = await hh_client.get_vacancy(token, vacancy_id)
+        active_items = await hh_client.get_vacancies(token, per_page=100, archived=False)
+        archived_items = await hh_client.get_vacancies(token, per_page=100, archived=True)
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    is_archived = _detect_archived(vacancy_item)
-    mapped_vacancy = _map_vacancy(vacancy_item, archived=is_archived)
+    found_active = _find_vacancy_by_id(active_items, vacancy_id)
+    if found_active is not None:
+        mapped = _map_vacancy(found_active, archived=False)
+        return {
+            'id': mapped['id'],
+            'name': mapped['name'],
+            'normalized_status': mapped['normalized_status'],
+            'published_at': mapped['published_at'],
+            'archived_at': mapped['archived_at'],
+            'responses_count': mapped['responses_count'],
+            'description': None,
+        }
 
+    found_archived = _find_vacancy_by_id(archived_items, vacancy_id)
+    if found_archived is not None:
+        mapped = _map_vacancy(found_archived, archived=True)
+        return {
+            'id': mapped['id'],
+            'name': mapped['name'],
+            'normalized_status': mapped['normalized_status'],
+            'published_at': mapped['published_at'],
+            'archived_at': mapped['archived_at'],
+            'responses_count': mapped['responses_count'],
+            'description': None,
+        }
+
+    raise HTTPException(status_code=404, detail='Вакансия не найдена.')
+
+
+@router.get('/vacancies/{vacancy_id}/responses')
+async def get_vacancy_responses(
+    vacancy_id: str,
+    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
+) -> dict[str, object]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        response_items = await hh_client.get_vacancy_responses(token, vacancy_id)
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    responses = [_map_response(item) for item in response_items]
+    return {
+        'vacancy_id': vacancy_id,
+        'items': responses,
+        'count': len(responses),
+    }
+
+
+def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict[str, object] | None:
+    for item in items:
+        if str(item.get('id', '')) == vacancy_id:
+            return item
+    return None
+
+
+def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object]:
     return {
         **mapped_vacancy,
         'description': _as_string_or_none(vacancy_item.get('description')),
@@ -240,7 +296,6 @@ def _map_response(item: dict[str, object]) -> dict[str, object]:
     return {
         'response_id': _as_string(item.get('id')),
         'candidate_name': _as_string_or_none(applicant.get('full_name') or applicant.get('name')),
-        'candidate_age': _extract_candidate_age(item, resume),
         'resume_title': _as_string_or_none(resume.get('title')),
         'expected_salary': _format_salary(salary),
         'location': _as_string_or_none(area.get('name')),
@@ -248,18 +303,6 @@ def _map_response(item: dict[str, object]) -> dict[str, object]:
         'cover_letter': _as_string_or_none(item.get('cover_letter') or item.get('message')),
         'status': _as_string_or_none(status.get('name') or status.get('id')),
     }
-
-
-def _extract_candidate_age(item: dict[str, object], resume: dict[str, object]) -> int | None:
-    age_raw = item.get('age')
-    if isinstance(age_raw, int):
-        return age_raw
-
-    age_from_resume = resume.get('age')
-    if isinstance(age_from_resume, int):
-        return age_from_resume
-
-    return None
 
 
 def _format_salary(salary: dict[str, object]) -> str | None:
@@ -298,20 +341,6 @@ def _extract_responses_count(item: dict[str, object]) -> int:
 
 def _normalize_status(archived: bool) -> str:
     return 'Архивная' if archived else 'Активная'
-
-
-def _detect_archived(item: dict[str, object]) -> bool:
-    if isinstance(item.get('archived'), bool):
-        return bool(item.get('archived'))
-
-    status = item.get('status')
-    if isinstance(status, dict):
-        status_id = status.get('id')
-        if isinstance(status_id, str) and status_id.lower() in {'archived', 'closed'}:
-            return True
-
-    archived_at = item.get('archived_at')
-    return bool(archived_at)
 
 
 def _as_string(value: object) -> str:
