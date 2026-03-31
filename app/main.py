@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import auth, employer
+from .api import auth, debug, employer
 
 app = FastAPI()
 
@@ -21,3 +21,5 @@ def root() -> dict[str, str]:
 
 app.include_router(auth.router, prefix='/api/auth')
 app.include_router(employer.router, prefix='/api')
+
+app.include_router(debug.router, prefix='/api/debug')
