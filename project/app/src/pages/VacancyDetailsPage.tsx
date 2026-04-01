@@ -295,6 +295,24 @@ export function VacancyDetailsPage() {
               )}
             </div>
           )}
+
+          {responsesPages > 1 ? (
+            <div className="responses-pagination">
+              <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
+                Назад
+              </button>
+              <span>
+                {responsesPage} / {responsesPages}
+              </span>
+              <button
+                type="button"
+                disabled={responsesPage >= responsesPages}
+                onClick={() => setResponsesPage((prev) => Math.min(prev + 1, responsesPages))}
+              >
+                Вперёд
+              </button>
+            </div>
+          ) : null}
         </section>
       </section>
     </main>
