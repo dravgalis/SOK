@@ -79,8 +79,15 @@ class HHClient:
 
         return all_items
 
-    async def get_vacancy_responses(self, access_token: str, vacancy_id: str, *, per_page: int = 100) -> list[dict[str, Any]]:
-        result = await self.get_vacancy_responses_with_debug(access_token, vacancy_id, per_page=per_page)
+    async def get_vacancy_responses(
+        self,
+        access_token: str,
+        vacancy_id: str,
+        *,
+        page: int = 1,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        result = await self.get_vacancy_responses_with_debug(access_token, vacancy_id, page=page, per_page=per_page)
         return result['items']
 
     async def get_vacancy_responses_with_debug(
@@ -88,18 +95,20 @@ class HHClient:
         access_token: str,
         vacancy_id: str,
         *,
+        page: int = 1,
         per_page: int = 100,
         employer_id: str | None = None,
     ) -> dict[str, Any]:
         hh_endpoint = f'{self.API_BASE_URL}/negotiations'
-        call_variants: list[dict[str, str]] = [{'vacancy_id': str(vacancy_id), 'per_page': str(per_page), 'page': '0'}]
+        hh_page = max(page - 1, 0)
+        call_variants: list[dict[str, str]] = [{'vacancy_id': str(vacancy_id), 'per_page': str(per_page), 'page': str(hh_page)}]
         if employer_id:
             call_variants.append(
                 {
                     'vacancy_id': str(vacancy_id),
                     'employer_id': str(employer_id),
                     'per_page': str(per_page),
-                    'page': '0',
+                    'page': str(hh_page),
                 },
             )
         debug_calls: list[dict[str, Any]] = []
@@ -123,14 +132,15 @@ class HHClient:
                 continue
 
             items = self._extract_response_items(payload)
-            found = payload.get('found') if isinstance(payload, dict) else None
+            found = self._extract_responses_count(payload)
             if items:
-                return {'items': items, 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
-            if isinstance(found, int) and found > 0:
+                return {'items': items, 'count': found or len(items), 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
+            if found > 0:
                 parse_warning = f'HH returned found={found}, but items were not parsed.'
 
         return {
             'items': [],
+            'count': 0,
             'debug': {
                 'hh_endpoint': hh_endpoint,
                 'calls': debug_calls,
@@ -176,6 +186,22 @@ class HHClient:
             if isinstance(value, list):
                 return [item for item in value if isinstance(item, dict)]
         return []
+
+    def _extract_responses_count(self, payload: Any) -> int:
+        if not isinstance(payload, dict):
+            return 0
+
+        for key in ('found', 'count', 'total'):
+            value = payload.get(key)
+            if isinstance(value, int):
+                return value
+
+        pages = payload.get('pages')
+        per_page = payload.get('per_page')
+        if isinstance(pages, int) and isinstance(per_page, int) and pages > 0 and per_page > 0:
+            return pages * per_page
+
+        return 0
 
     async def _request(
         self,
