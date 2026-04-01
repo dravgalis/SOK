@@ -41,6 +41,18 @@ type VacancyResponsesPayload = {
   count?: number;
 };
 
+type ResponsesSummaryItem = {
+  state: string;
+  state_name?: string | null;
+  count: number;
+};
+
+type VacancyResponsesPayload = {
+  items: VacancyResponse[];
+  summary_by_state?: ResponsesSummaryItem[];
+  count?: number;
+};
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
 
