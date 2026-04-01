@@ -143,11 +143,12 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
-        responses = responses_payload['items']
 
     return {
         'vacancy_id': vacancy_id,
-        'items': [_normalize_response(item) for item in responses],
+        'items': responses_payload['items'],
+        'summary_by_state': responses_payload['summary_by_state'],
+        'total': responses_payload['count'],
         'count': responses_payload['count'],
     }
 
@@ -276,54 +277,184 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
-    page = 0
-    per_page = 50
-    all_items: list[dict] = []
-    total_count = 0
+    payload = await _hh_get(
+        client,
+        '/negotiations',
+        access_token=access_token,
+        params={
+            'vacancy_id': vacancy_id,
+            'status': 'any',
+            'page': '0',
+            'per_page': '50',
+        },
+        allow_404=True,
+    )
 
-    while True:
-        payload = await _hh_get(
+    if payload.get('_status_code') == 404:
+        return {'items': [], 'summary_by_state': [], 'count': 0}
+
+    summary_by_state = _extract_summary_by_state(payload)
+
+    source_items = _extract_candidate_source_items(payload)
+    if not source_items:
+        followup_items = await _fetch_followup_negotiations_from_collections(
             client,
-            '/negotiations',
             access_token=access_token,
-            params={
-                'vacancy_id': vacancy_id,
-                'status': 'any',
-                'page': str(page),
-                'per_page': str(per_page),
-            },
-            allow_404=True,
+            payload=payload,
         )
+        source_items.extend(followup_items)
 
-        if payload.get('_status_code') == 404:
-            return {'items': [], 'count': 0}
+    normalized_items = [_normalize_response(item) for item in source_items]
+    return {
+        'items': normalized_items,
+        'summary_by_state': summary_by_state,
+        'count': len(normalized_items),
+    }
 
-        items = payload.get('items')
-        if isinstance(items, list):
-            all_items.extend(item for item in items if isinstance(item, dict))
 
-        found = payload.get('found')
-        if isinstance(found, int):
-            total_count = found
-        elif page == 0:
-            counters = payload.get('counters')
-            if isinstance(counters, dict):
-                counters_total = counters.get('total')
-                if isinstance(counters_total, int):
-                    total_count = counters_total
+def _extract_collection_entries(collection: dict) -> list[dict]:
+    sub_collections = collection.get('sub_collections')
+    if isinstance(sub_collections, list) and sub_collections:
+        return [item for item in sub_collections if isinstance(item, dict)]
+    return [collection]
 
-        pages = payload.get('pages')
-        if not isinstance(pages, int):
-            break
 
-        page += 1
-        if page >= pages:
-            break
+def _extract_summary_by_state(payload: dict) -> list[dict[str, object]]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
 
-    if total_count == 0:
-        total_count = len(all_items)
+    summary: list[dict[str, object]] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
 
-    return {'items': all_items, 'count': total_count}
+        for entry in _extract_collection_entries(collection):
+            state = entry.get('id')
+            counters = entry.get('counters') if isinstance(entry.get('counters'), dict) else {}
+            count_value = counters.get('total')
+            if not isinstance(count_value, int):
+                count_value = 0
+
+            summary.append(
+                {
+                    'state': str(state) if state is not None else '',
+                    'state_name': str(entry.get('name', '')) if entry.get('name') is not None else '',
+                    'count': count_value,
+                }
+            )
+    return summary
+
+
+def _extract_candidate_source_items(payload: dict) -> list[dict]:
+    raw_items = payload.get('items')
+    if not isinstance(raw_items, list):
+        return []
+
+    return [item for item in raw_items if _is_real_response_item(item)]
+
+
+def _is_real_response_item(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    has_applicant = isinstance(item.get('applicant'), dict)
+    has_resume = isinstance(item.get('resume'), dict)
+    has_id = item.get('id') is not None
+    return has_id and (has_applicant or has_resume)
+
+
+def _extract_collection_urls(payload: dict) -> list[str]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
+
+    urls: list[str] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+
+        for entry in _extract_collection_entries(collection):
+            for key in ('url', 'items_url', 'negotiations_url', 'negotiation_url'):
+                value = entry.get(key)
+                if isinstance(value, str) and value:
+                    urls.append(value)
+            entry_id = entry.get('id')
+            if isinstance(entry_id, str) and entry_id:
+                urls.append(f'/negotiations?status={entry_id}')
+    return urls
+
+
+def _normalize_hh_url_to_path(url_or_path: str) -> str | None:
+    if not url_or_path:
+        return None
+
+    if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
+        parsed = urlparse(url_or_path)
+        if not parsed.path:
+            return None
+        query = f'?{parsed.query}' if parsed.query else ''
+        return f'{parsed.path}{query}'
+
+    if url_or_path.startswith('/'):
+        return url_or_path
+
+    return f'/{url_or_path}'
+
+
+async def _fetch_followup_negotiations_from_collections(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    payload: dict,
+) -> list[dict]:
+    seen_ids: set[str] = set()
+    collected_items: list[dict] = []
+
+    for url_or_path in _extract_collection_urls(payload):
+        normalized_path = _normalize_hh_url_to_path(url_or_path)
+        if not normalized_path:
+            continue
+
+        try:
+            followup_payload = await _hh_get(client, normalized_path, access_token=access_token)
+        except HTTPException:
+            continue
+
+        candidate_items = _extract_candidate_source_items(followup_payload)
+        for item in candidate_items:
+            item_id = str(item.get('id', ''))
+            if item_id and item_id not in seen_ids:
+                seen_ids.add(item_id)
+                collected_items.append(item)
+
+        nested_items = followup_payload.get('items')
+        if isinstance(nested_items, list):
+            for nested_item in nested_items:
+                if not isinstance(nested_item, dict):
+                    continue
+                nested_url = None
+                for key in ('url', 'negotiation_url'):
+                    value = nested_item.get(key)
+                    if isinstance(value, str) and value:
+                        nested_url = value
+                        break
+                if not nested_url:
+                    continue
+                nested_path = _normalize_hh_url_to_path(nested_url)
+                if not nested_path:
+                    continue
+                try:
+                    nested_payload = await _hh_get(client, nested_path, access_token=access_token)
+                except HTTPException:
+                    continue
+                if _is_real_response_item(nested_payload):
+                    nested_id = str(nested_payload.get('id', ''))
+                    if nested_id and nested_id not in seen_ids:
+                        seen_ids.add(nested_id)
+                        collected_items.append(nested_payload)
+
+    return collected_items
 
 
 def _extract_user_name(me_payload: dict) -> str | None:
@@ -420,14 +551,35 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
         expected_salary = f'{expected_salary} {currency}'
 
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
+    contact = item.get('contact') if isinstance(item.get('contact'), dict) else applicant.get('contact') if isinstance(applicant.get('contact'), dict) else {}
+    phones = contact.get('phones') if isinstance(contact.get('phones'), list) else applicant.get('phones') if isinstance(applicant.get('phones'), list) else []
+
+    phone: str | None = None
+    for phone_item in phones:
+        if isinstance(phone_item, dict):
+            phone_value = phone_item.get('number') or phone_item.get('formatted')
+            if isinstance(phone_value, str) and phone_value:
+                phone = phone_value
+                break
+        elif isinstance(phone_item, str) and phone_item:
+            phone = phone_item
+            break
+
+    email = contact.get('email') if isinstance(contact.get('email'), str) else applicant.get('email') if isinstance(applicant.get('email'), str) else None
+    age = resume.get('age') if isinstance(resume.get('age'), int) else applicant.get('age') if isinstance(applicant.get('age'), int) else None
+    resume_url = resume.get('alternate_url') if isinstance(resume.get('alternate_url'), str) else resume.get('url') if isinstance(resume.get('url'), str) else None
 
     return {
         'response_id': str(item.get('id', '')),
         'candidate_name': applicant.get('full_name') if isinstance(applicant.get('full_name'), str) else applicant.get('name') if isinstance(applicant.get('name'), str) else None,
         'resume_title': resume.get('title') if isinstance(resume.get('title'), str) else None,
+        'age': age,
         'expected_salary': expected_salary,
         'location': area.get('name') if isinstance(area.get('name'), str) else None,
         'response_created_at': str(item.get('created_at')) if item.get('created_at') else None,
         'cover_letter': item.get('cover_letter') if isinstance(item.get('cover_letter'), str) else item.get('message') if isinstance(item.get('message'), str) else None,
         'status': state.get('name') if isinstance(state.get('name'), str) else state.get('id') if isinstance(state.get('id'), str) else None,
+        'resume_url': resume_url,
+        'phone': phone,
+        'email': email,
     }
