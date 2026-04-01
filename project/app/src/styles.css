@@ -275,16 +275,23 @@ p {
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .response-card {
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
-  padding: 14px;
+  padding: 10px 12px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
+}
+
+.response-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
 }
 
 .response-card span {
@@ -293,6 +300,27 @@ p {
 
 .response-card p {
   margin: 4px 0 0;
+}
+
+.responses-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.responses-pagination button {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #0f172a;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.responses-pagination button:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 @media (max-width: 680px) {
