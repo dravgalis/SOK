@@ -147,8 +147,9 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
     return {
         'vacancy_id': vacancy_id,
         'items': responses_payload['items'],
-        'total': responses_payload['total'],
-        'count': responses_payload['total'],
+        'summary_by_state': responses_payload['summary_by_state'],
+        'total': responses_payload['count'],
+        'count': responses_payload['count'],
     }
 
 
@@ -290,38 +291,34 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     )
 
     if payload.get('_status_code') == 404:
-        return {'items': [], 'total': 0}
+        return {'items': [], 'summary_by_state': [], 'count': 0}
 
-    collections = payload.get('collections')
-    if not isinstance(collections, list):
-        return {'items': [], 'total': 0}
+    summary_by_state = _extract_summary_by_state(payload)
+    total_count = sum(item['count'] for item in summary_by_state)
 
-    stage_items: list[dict[str, object | None]] = []
-    total_count = 0
+    raw_items = payload.get('items')
+    has_real_items = isinstance(raw_items, list) and any(_is_real_response_item(item) for item in raw_items)
+    if not has_real_items:
+        return {
+            'items': [],
+            'summary_by_state': summary_by_state,
+            'count': total_count,
+        }
 
-    for collection in collections:
-        if not isinstance(collection, dict):
-            continue
+    normalized_items = [
+        _normalize_response(item)
+        for item in raw_items
+        if isinstance(item, dict)
+    ]
 
-        entries = _extract_collection_entries(collection)
-        for entry in entries:
-            state = entry.get('id')
-            state_name = entry.get('name')
-            counters = entry.get('counters') if isinstance(entry.get('counters'), dict) else {}
-            count_value = counters.get('total')
-            count = count_value if isinstance(count_value, int) else 0
-            total_count += count
+    if not total_count:
+        total_count = len(normalized_items)
 
-            stage_items.append(
-                {
-                    'id': None,
-                    'state': str(state) if state is not None else None,
-                    'state_name': str(state_name) if state_name is not None else None,
-                    'count': count,
-                }
-            )
-
-    return {'items': stage_items, 'total': total_count}
+    return {
+        'items': normalized_items,
+        'summary_by_state': summary_by_state,
+        'count': total_count,
+    }
 
 
 def _extract_collection_entries(collection: dict) -> list[dict]:
@@ -329,6 +326,43 @@ def _extract_collection_entries(collection: dict) -> list[dict]:
     if isinstance(sub_collections, list) and sub_collections:
         return [item for item in sub_collections if isinstance(item, dict)]
     return [collection]
+
+
+def _extract_summary_by_state(payload: dict) -> list[dict[str, object]]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
+
+    summary: list[dict[str, object]] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+
+        for entry in _extract_collection_entries(collection):
+            state = entry.get('id')
+            counters = entry.get('counters') if isinstance(entry.get('counters'), dict) else {}
+            count_value = counters.get('total')
+            if not isinstance(count_value, int):
+                count_value = 0
+
+            summary.append(
+                {
+                    'state': str(state) if state is not None else '',
+                    'state_name': str(entry.get('name', '')) if entry.get('name') is not None else '',
+                    'count': count_value,
+                }
+            )
+    return summary
+
+
+def _is_real_response_item(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    has_applicant = isinstance(item.get('applicant'), dict)
+    has_resume = isinstance(item.get('resume'), dict)
+    has_id = item.get('id') is not None
+    return has_id and (has_applicant or has_resume)
 
 
 def _extract_user_name(me_payload: dict) -> str | None:
