@@ -220,6 +220,8 @@ async def get_vacancy_details(
 @router.get('/vacancies/{vacancy_id}/responses')
 async def get_vacancy_responses(
     vacancy_id: str,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=25, ge=1),
     access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
 ) -> dict[str, object]:
     token = _require_access_token(access_token)
@@ -228,16 +230,27 @@ async def get_vacancy_responses(
     try:
         me = await hh_client.get_current_user(token)
         employer_id = _extract_employer_id(me)
-        response_result = await hh_client.get_vacancy_responses_with_debug(token, vacancy_id, employer_id=employer_id)
+        response_result = await hh_client.get_vacancy_responses_with_debug(
+            token,
+            vacancy_id,
+            page=page,
+            per_page=per_page,
+            employer_id=employer_id,
+        )
     except HHClientError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     response_items = response_result.get('items') if isinstance(response_result.get('items'), list) else []
     responses = [_map_response(item) for item in response_items]
+    total_count = response_result.get('count') if isinstance(response_result.get('count'), int) else len(responses)
+    pages = (total_count + per_page - 1) // per_page if total_count > 0 else 1
     payload: dict[str, object] = {
         'vacancy_id': vacancy_id,
         'items': responses,
-        'count': len(responses),
+        'count': total_count,
+        'page': page,
+        'per_page': per_page,
+        'pages': pages,
     }
     if not responses:
         payload['debug'] = response_result.get('debug')
@@ -295,9 +308,12 @@ def _map_response(item: dict[str, object]) -> dict[str, object]:
     salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
     status = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
+    applicant_first_name = _as_string_or_none(applicant.get('first_name'))
+    applicant_last_name = _as_string_or_none(applicant.get('last_name'))
     candidate_name = (
         applicant.get('full_name')
         or applicant.get('name')
+        or ' '.join(part for part in (applicant_first_name, applicant_last_name) if part)
         or _extract_nested_value(item, ('resume', 'owner', 'name'))
         or _extract_nested_value(item, ('resume', 'first_name'))
     )
