@@ -143,12 +143,12 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
-        responses = responses_payload['items']
 
     return {
         'vacancy_id': vacancy_id,
-        'items': [_normalize_response(item) for item in responses],
-        'count': responses_payload['count'],
+        'items': responses_payload['items'],
+        'total': responses_payload['total'],
+        'count': responses_payload['total'],
     }
 
 
@@ -276,54 +276,59 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
-    page = 0
-    per_page = 50
-    all_items: list[dict] = []
+    payload = await _hh_get(
+        client,
+        '/negotiations',
+        access_token=access_token,
+        params={
+            'vacancy_id': vacancy_id,
+            'status': 'any',
+            'page': '0',
+            'per_page': '50',
+        },
+        allow_404=True,
+    )
+
+    if payload.get('_status_code') == 404:
+        return {'items': [], 'total': 0}
+
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return {'items': [], 'total': 0}
+
+    stage_items: list[dict[str, object | None]] = []
     total_count = 0
 
-    while True:
-        payload = await _hh_get(
-            client,
-            '/negotiations',
-            access_token=access_token,
-            params={
-                'vacancy_id': vacancy_id,
-                'status': 'any',
-                'page': str(page),
-                'per_page': str(per_page),
-            },
-            allow_404=True,
-        )
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
 
-        if payload.get('_status_code') == 404:
-            return {'items': [], 'count': 0}
+        entries = _extract_collection_entries(collection)
+        for entry in entries:
+            state = entry.get('id')
+            state_name = entry.get('name')
+            counters = entry.get('counters') if isinstance(entry.get('counters'), dict) else {}
+            count_value = counters.get('total')
+            count = count_value if isinstance(count_value, int) else 0
+            total_count += count
 
-        items = payload.get('items')
-        if isinstance(items, list):
-            all_items.extend(item for item in items if isinstance(item, dict))
+            stage_items.append(
+                {
+                    'id': None,
+                    'state': str(state) if state is not None else None,
+                    'state_name': str(state_name) if state_name is not None else None,
+                    'count': count,
+                }
+            )
 
-        found = payload.get('found')
-        if isinstance(found, int):
-            total_count = found
-        elif page == 0:
-            counters = payload.get('counters')
-            if isinstance(counters, dict):
-                counters_total = counters.get('total')
-                if isinstance(counters_total, int):
-                    total_count = counters_total
+    return {'items': stage_items, 'total': total_count}
 
-        pages = payload.get('pages')
-        if not isinstance(pages, int):
-            break
 
-        page += 1
-        if page >= pages:
-            break
-
-    if total_count == 0:
-        total_count = len(all_items)
-
-    return {'items': all_items, 'count': total_count}
+def _extract_collection_entries(collection: dict) -> list[dict]:
+    sub_collections = collection.get('sub_collections')
+    if isinstance(sub_collections, list) and sub_collections:
+        return [item for item in sub_collections if isinstance(item, dict)]
+    return [collection]
 
 
 def _extract_user_name(me_payload: dict) -> str | None:
