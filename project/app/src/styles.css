@@ -270,6 +270,13 @@ p {
   gap: 14px;
 }
 
+.responses-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .responses-list {
   list-style: none;
   margin: 0;

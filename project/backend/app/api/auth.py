@@ -305,16 +305,25 @@ def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object
 def _map_response(item: dict[str, object]) -> dict[str, object]:
     resume = _extract_first_dict(item, ('resume', 'resume_info', 'cv'))
     applicant = _extract_first_dict(item, ('applicant', 'user', 'candidate'))
+    negotiation = _extract_first_dict(item, ('negotiation', 'negotiations', 'topic'))
     salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
     status = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
     applicant_first_name = _as_string_or_none(applicant.get('first_name'))
     applicant_last_name = _as_string_or_none(applicant.get('last_name'))
+    resume_first_name = _as_string_or_none(_extract_nested_value(item, ('resume', 'first_name')))
+    resume_last_name = _as_string_or_none(_extract_nested_value(item, ('resume', 'last_name')))
+    negotiation_first_name = _as_string_or_none(negotiation.get('first_name'))
+    negotiation_last_name = _as_string_or_none(negotiation.get('last_name'))
     candidate_name = (
         applicant.get('full_name')
         or applicant.get('name')
         or ' '.join(part for part in (applicant_first_name, applicant_last_name) if part)
+        or ' '.join(part for part in (resume_first_name, resume_last_name) if part)
+        or ' '.join(part for part in (negotiation_first_name, negotiation_last_name) if part)
         or _extract_nested_value(item, ('resume', 'owner', 'name'))
+        or _extract_nested_value(item, ('resume', 'owner', 'full_name'))
+        or _extract_nested_value(item, ('applicant', 'full_name'))
         or _extract_nested_value(item, ('resume', 'first_name'))
     )
     cover_letter = (
@@ -325,16 +334,25 @@ def _map_response(item: dict[str, object]) -> dict[str, object]:
     )
     created_at = item.get('created_at') or item.get('updated_at') or item.get('date')
     response_id = item.get('id') or item.get('response_id') or _extract_nested_value(item, ('topic', 'id'))
+    age = resume.get('age') or applicant.get('age') or _extract_nested_value(item, ('resume', 'owner', 'age'))
+    resume_url = (
+        resume.get('alternate_url')
+        or resume.get('url')
+        or _extract_nested_value(item, ('resume', 'alternate_url'))
+        or _extract_nested_value(item, ('resume', 'url'))
+    )
 
     return {
         'response_id': _as_string(response_id),
         'candidate_name': _as_string_or_none(candidate_name),
         'resume_title': _as_string_or_none(resume.get('title')),
+        'age': int(age) if isinstance(age, int) else None,
         'expected_salary': _format_salary(salary),
         'location': _as_string_or_none(area.get('name')),
         'response_created_at': _as_string_or_none(created_at),
         'cover_letter': _as_string_or_none(cover_letter),
         'status': _as_string_or_none(status.get('name') or status.get('id')),
+        'resume_url': _as_string_or_none(resume_url),
     }
 
 

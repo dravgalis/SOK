@@ -44,7 +44,8 @@ type VacancyResponsesPayload = {
   pages?: number;
 };
 
-const RESPONSES_PER_PAGE = 25;
+const DEFAULT_RESPONSES_PER_PAGE = 25;
+const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50] as const;
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -85,12 +86,17 @@ export function VacancyDetailsPage() {
   const [responsesPage, setResponsesPage] = useState(1);
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
+  const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     setResponsesPage(1);
   }, [vacancyId]);
+
+  useEffect(() => {
+    setResponsesPage(1);
+  }, [responsesPerPage]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -106,7 +112,7 @@ export function VacancyDetailsPage() {
 
         const [vacancyResponse, responsesResponse] = await Promise.all([
           fetch(APP_ENDPOINTS.vacancyById(vacancyId), { credentials: 'include' }),
-          fetch(`${APP_ENDPOINTS.vacancyResponses(vacancyId)}?page=${responsesPage}&per_page=${RESPONSES_PER_PAGE}`, {
+          fetch(`${APP_ENDPOINTS.vacancyResponses(vacancyId)}?page=${responsesPage}&per_page=${responsesPerPage}`, {
             credentials: 'include',
           }),
         ]);
@@ -135,7 +141,7 @@ export function VacancyDetailsPage() {
     };
 
     void loadData();
-  }, [vacancyId, responsesPage]);
+  }, [vacancyId, responsesPage, responsesPerPage]);
 
   const vacancyStatus = useMemo(() => {
     if (!vacancy) return '—';
@@ -211,6 +217,37 @@ export function VacancyDetailsPage() {
 
         <section className="responses-section">
           <h2>Отклики</h2>
+
+          <div className="responses-controls">
+            <label>
+              Показывать по:{' '}
+              <select value={responsesPerPage} onChange={(event) => setResponsesPerPage(Number(event.target.value))}>
+                {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {responsesPages > 1 ? (
+              <div className="responses-pagination">
+                <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
+                  Назад
+                </button>
+                <span>
+                  {responsesPage} / {responsesPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={responsesPage >= responsesPages}
+                  onClick={() => setResponsesPage((prev) => Math.min(prev + 1, responsesPages))}
+                >
+                  Вперёд
+                </button>
+              </div>
+            ) : null}
+          </div>
 
           {visibleResponses.length > 0 ? (
             <ul className="responses-list">
