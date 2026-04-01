@@ -143,11 +143,12 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
-        responses = responses_payload['items']
 
     return {
         'vacancy_id': vacancy_id,
-        'items': [_normalize_response(item) for item in responses],
+        'items': responses_payload['items'],
+        'summary_by_state': responses_payload['summary_by_state'],
+        'total': responses_payload['count'],
         'count': responses_payload['count'],
     }
 
@@ -276,54 +277,92 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
-    page = 0
-    per_page = 50
-    all_items: list[dict] = []
-    total_count = 0
+    payload = await _hh_get(
+        client,
+        '/negotiations',
+        access_token=access_token,
+        params={
+            'vacancy_id': vacancy_id,
+            'status': 'any',
+            'page': '0',
+            'per_page': '50',
+        },
+        allow_404=True,
+    )
 
-    while True:
-        payload = await _hh_get(
-            client,
-            '/negotiations',
-            access_token=access_token,
-            params={
-                'vacancy_id': vacancy_id,
-                'status': 'any',
-                'page': str(page),
-                'per_page': str(per_page),
-            },
-            allow_404=True,
-        )
+    if payload.get('_status_code') == 404:
+        return {'items': [], 'summary_by_state': [], 'count': 0}
 
-        if payload.get('_status_code') == 404:
-            return {'items': [], 'count': 0}
+    summary_by_state = _extract_summary_by_state(payload)
+    total_count = sum(item['count'] for item in summary_by_state)
 
-        items = payload.get('items')
-        if isinstance(items, list):
-            all_items.extend(item for item in items if isinstance(item, dict))
+    raw_items = payload.get('items')
+    has_real_items = isinstance(raw_items, list) and any(_is_real_response_item(item) for item in raw_items)
+    if not has_real_items:
+        return {
+            'items': [],
+            'summary_by_state': summary_by_state,
+            'count': total_count,
+        }
 
-        found = payload.get('found')
-        if isinstance(found, int):
-            total_count = found
-        elif page == 0:
-            counters = payload.get('counters')
-            if isinstance(counters, dict):
-                counters_total = counters.get('total')
-                if isinstance(counters_total, int):
-                    total_count = counters_total
+    normalized_items = [
+        _normalize_response(item)
+        for item in raw_items
+        if isinstance(item, dict)
+    ]
 
-        pages = payload.get('pages')
-        if not isinstance(pages, int):
-            break
+    if not total_count:
+        total_count = len(normalized_items)
 
-        page += 1
-        if page >= pages:
-            break
+    return {
+        'items': normalized_items,
+        'summary_by_state': summary_by_state,
+        'count': total_count,
+    }
 
-    if total_count == 0:
-        total_count = len(all_items)
 
-    return {'items': all_items, 'count': total_count}
+def _extract_collection_entries(collection: dict) -> list[dict]:
+    sub_collections = collection.get('sub_collections')
+    if isinstance(sub_collections, list) and sub_collections:
+        return [item for item in sub_collections if isinstance(item, dict)]
+    return [collection]
+
+
+def _extract_summary_by_state(payload: dict) -> list[dict[str, object]]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
+
+    summary: list[dict[str, object]] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+
+        for entry in _extract_collection_entries(collection):
+            state = entry.get('id')
+            counters = entry.get('counters') if isinstance(entry.get('counters'), dict) else {}
+            count_value = counters.get('total')
+            if not isinstance(count_value, int):
+                count_value = 0
+
+            summary.append(
+                {
+                    'state': str(state) if state is not None else '',
+                    'state_name': str(entry.get('name', '')) if entry.get('name') is not None else '',
+                    'count': count_value,
+                }
+            )
+    return summary
+
+
+def _is_real_response_item(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    has_applicant = isinstance(item.get('applicant'), dict)
+    has_resume = isinstance(item.get('resume'), dict)
+    has_id = item.get('id') is not None
+    return has_id and (has_applicant or has_resume)
 
 
 def _extract_user_name(me_payload: dict) -> str | None:

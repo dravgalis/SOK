@@ -26,6 +26,18 @@ type VacancyResponse = {
   status?: string | null;
 };
 
+type ResponsesSummaryItem = {
+  state: string;
+  state_name?: string | null;
+  count: number;
+};
+
+type VacancyResponsesPayload = {
+  items: VacancyResponse[];
+  summary_by_state?: ResponsesSummaryItem[];
+  count?: number;
+};
+
 function formatDate(value?: string | null): string {
   if (!value) return '—';
 
@@ -45,6 +57,7 @@ export function VacancyDetailsPage() {
   const { vacancyId } = useParams<{ vacancyId: string }>();
   const [vacancy, setVacancy] = useState<VacancyDetails | null>(null);
   const [responses, setResponses] = useState<VacancyResponse[]>([]);
+  const [summaryByState, setSummaryByState] = useState<ResponsesSummaryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -74,10 +87,11 @@ export function VacancyDetailsPage() {
         }
 
         const vacancyPayload = (await vacancyResponse.json()) as VacancyDetails;
-        const responsesPayload = (await responsesResponse.json()) as { items: VacancyResponse[] };
+        const responsesPayload = (await responsesResponse.json()) as VacancyResponsesPayload;
 
         setVacancy(vacancyPayload);
         setResponses(responsesPayload.items || []);
+        setSummaryByState(responsesPayload.summary_by_state || []);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
       } finally {
@@ -163,8 +177,20 @@ export function VacancyDetailsPage() {
 
           {responses.length === 0 ? (
             <div className="vacancies-empty">
-              <h3>Откликов пока нет</h3>
-              <p>Для этой вакансии пока не найдено откликов.</p>
+              <h3>Подробные данные кандидатов пока недоступны</h3>
+              {summaryByState.length > 0 ? (
+                <ul className="responses-list">
+                  {summaryByState.map((summaryItem) => (
+                    <li key={`${summaryItem.state}-${summaryItem.state_name}`} className="response-card">
+                      <strong>{summaryItem.state_name || summaryItem.state || '—'}</strong>
+                      <span>Код стадии: {summaryItem.state || '—'}</span>
+                      <span>Количество: {summaryItem.count ?? 0}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>Для этой вакансии пока не найдено откликов.</p>
+              )}
             </div>
           ) : (
             <ul className="responses-list">
