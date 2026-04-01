@@ -17,13 +17,28 @@ type VacancyDetails = {
 type VacancyResponse = {
   response_id: string;
   candidate_name?: string | null;
-  candidate_age?: number | null;
+  age?: number | null;
   resume_title?: string | null;
   expected_salary?: string | null;
   location?: string | null;
   response_created_at?: string | null;
   cover_letter?: string | null;
   status?: string | null;
+  resume_url?: string | null;
+  phone?: string | null;
+  email?: string | null;
+};
+
+type ResponsesSummaryItem = {
+  state: string;
+  state_name?: string | null;
+  count: number;
+};
+
+type VacancyResponsesPayload = {
+  items: VacancyResponse[];
+  summary_by_state?: ResponsesSummaryItem[];
+  count?: number;
 };
 
 type ResponsesSummaryItem = {
@@ -196,14 +211,43 @@ export function VacancyDetailsPage() {
             <ul className="responses-list">
               {responses.map((response) => (
                 <li key={response.response_id} className="response-card">
-                  <strong>{response.candidate_name || 'Кандидат без имени'}</strong>
-                  <span>Резюме: {response.resume_title || '—'}</span>
-                  <span>Возраст: {response.candidate_age ?? '—'}</span>
-                  <span>Зарплатные ожидания: {response.expected_salary || '—'}</span>
-                  <span>Локация: {response.location || '—'}</span>
-                  <span>Дата отклика: {formatDate(response.response_created_at)}</span>
-                  <span>Статус: {response.status || '—'}</span>
-                  <p>Сопроводительное письмо: {response.cover_letter || '—'}</p>
+                  {(() => {
+                    const hasVisibleData = Boolean(
+                      response.candidate_name ||
+                        response.resume_title ||
+                        typeof response.age === 'number' ||
+                        response.expected_salary ||
+                        response.location ||
+                        response.response_created_at ||
+                        response.status ||
+                        response.resume_url ||
+                        response.phone ||
+                        response.email ||
+                        response.cover_letter
+                    );
+
+                    if (!hasVisibleData) return null;
+
+                    return (
+                      <>
+                        {response.candidate_name ? <strong>{response.candidate_name}</strong> : null}
+                        {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
+                        {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : null}
+                        {response.expected_salary ? <span>Зарплатные ожидания: {response.expected_salary}</span> : null}
+                        {response.location ? <span>Локация: {response.location}</span> : null}
+                        {response.response_created_at ? <span>Дата отклика: {formatDate(response.response_created_at)}</span> : null}
+                        {response.status ? <span>Статус: {response.status}</span> : null}
+                        {response.resume_url ? (
+                          <a href={response.resume_url} target="_blank" rel="noreferrer">
+                            Открыть резюме
+                          </a>
+                        ) : null}
+                        {response.phone ? <span>Телефон: {response.phone}</span> : null}
+                        {response.email ? <span>Email: {response.email}</span> : null}
+                        {response.cover_letter ? <p>Сопроводительное письмо: {response.cover_letter}</p> : null}
+                      </>
+                    );
+                  })()}
                 </li>
               ))}
             </ul>
