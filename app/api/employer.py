@@ -150,6 +150,12 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
         'summary_by_state': responses_payload['summary_by_state'],
         'total': responses_payload['count'],
         'count': responses_payload['count'],
+        'total_from_vacancy': responses_payload['total_from_vacancy'],
+        'hh_total_raw': responses_payload['hh_total_raw'],
+        'pages_loaded': responses_payload['pages_loaded'],
+        'items_before_filtering': responses_payload['items_before_filtering'],
+        'items_after_filtering': responses_payload['items_after_filtering'],
+        'states_processed': responses_payload['states_processed'],
     }
 
 
@@ -277,6 +283,14 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
+    vacancy_payload = await _hh_get(
+        client,
+        f'/vacancies/{vacancy_id}',
+        access_token=access_token,
+        allow_404=True,
+    )
+    total_from_vacancy = _extract_responses_count(vacancy_payload) if vacancy_payload.get('_status_code') != 404 else 0
+
     payload = await _hh_get(
         client,
         '/negotiations',
@@ -291,25 +305,147 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     )
 
     if payload.get('_status_code') == 404:
-        return {'items': [], 'summary_by_state': [], 'count': 0}
+        return {
+            'items': [],
+            'summary_by_state': [],
+            'count': 0,
+            'total_from_vacancy': total_from_vacancy,
+            'hh_total_raw': 0,
+            'pages_loaded': 0,
+            'items_before_filtering': 0,
+            'items_after_filtering': 0,
+            'states_processed': [],
+        }
 
     summary_by_state = _extract_summary_by_state(payload)
+    states_processed = _extract_states_from_collections(payload)
+    if 'any' not in states_processed:
+        states_processed.insert(0, 'any')
 
-    source_items = _extract_candidate_source_items(payload)
-    if not source_items:
+    pages_loaded = 0
+    hh_total_raw = _extract_hh_total_raw(payload)
+    raw_items: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for state in states_processed:
+        state_items, state_pages, state_total = await _fetch_negotiations_pages(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            state=state,
+        )
+        pages_loaded += state_pages
+        if isinstance(state_total, int):
+            hh_total_raw = max(hh_total_raw, state_total)
+
+        for item in state_items:
+            item_id = str(item.get('id', '')).strip()
+            if item_id and item_id in seen_ids:
+                continue
+            if item_id:
+                seen_ids.add(item_id)
+            raw_items.append(item)
+
+    if not raw_items:
         followup_items = await _fetch_followup_negotiations_from_collections(
             client,
             access_token=access_token,
             payload=payload,
         )
-        source_items.extend(followup_items)
+        for item in followup_items:
+            item_id = str(item.get('id', '')).strip()
+            if item_id and item_id in seen_ids:
+                continue
+            if item_id:
+                seen_ids.add(item_id)
+            raw_items.append(item)
+
+    items_before_filtering = len(raw_items)
+    source_items = [item for item in raw_items if _is_real_response_item(item)]
+    items_after_filtering = len(source_items)
 
     normalized_items = [_normalize_response(item) for item in source_items]
     return {
         'items': normalized_items,
         'summary_by_state': summary_by_state,
         'count': len(normalized_items),
+        'total_from_vacancy': total_from_vacancy,
+        'hh_total_raw': hh_total_raw,
+        'pages_loaded': pages_loaded,
+        'items_before_filtering': items_before_filtering,
+        'items_after_filtering': items_after_filtering,
+        'states_processed': states_processed,
     }
+
+
+def _extract_hh_total_raw(payload: dict) -> int:
+    for key in ('total', 'found', 'count'):
+        value = payload.get(key)
+        if isinstance(value, int):
+            return value
+    return 0
+
+
+def _extract_states_from_collections(payload: dict) -> list[str]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
+
+    states: list[str] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+        for entry in _extract_collection_entries(collection):
+            state = entry.get('id')
+            if isinstance(state, str) and state and state not in states:
+                states.append(state)
+    return states
+
+
+async def _fetch_negotiations_pages(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    state: str,
+) -> tuple[list[dict], int, int | None]:
+    page = 0
+    per_page = 50
+    pages_loaded = 0
+    items: list[dict] = []
+    raw_total: int | None = None
+
+    while True:
+        payload = await _hh_get(
+            client,
+            '/negotiations',
+            access_token=access_token,
+            params={
+                'vacancy_id': vacancy_id,
+                'status': state,
+                'page': str(page),
+                'per_page': str(per_page),
+            },
+            allow_404=True,
+        )
+        if payload.get('_status_code') == 404:
+            break
+
+        pages_loaded += 1
+        raw_total = _extract_hh_total_raw(payload)
+
+        page_items = payload.get('items')
+        if isinstance(page_items, list):
+            items.extend(item for item in page_items if isinstance(item, dict))
+
+        pages = payload.get('pages')
+        if not isinstance(pages, int):
+            break
+        page += 1
+        if page >= pages:
+            break
+
+    return items, pages_loaded, raw_total
 
 
 def _extract_collection_entries(collection: dict) -> list[dict]:
@@ -358,10 +494,18 @@ def _is_real_response_item(item: object) -> bool:
     if not isinstance(item, dict):
         return False
 
+    has_id = item.get('id') is not None
+    if not has_id:
+        return False
+
     has_applicant = isinstance(item.get('applicant'), dict)
     has_resume = isinstance(item.get('resume'), dict)
-    has_id = item.get('id') is not None
-    return has_id and (has_applicant or has_resume)
+    if has_applicant or has_resume:
+        return True
+
+    state = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
+    has_state = isinstance(state.get('id'), str) or isinstance(state.get('name'), str)
+    return has_state
 
 
 def _extract_collection_urls(payload: dict) -> list[str]:
