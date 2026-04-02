@@ -254,7 +254,7 @@ export function VacancyDetailsPage() {
               {visibleResponses.map((response) => (
                 <li key={response.response_id} className="response-card">
                   <div className="response-row">
-                    <strong>{response.candidate_name || response.resume_title || 'Кандидат без имени'}</strong>
+                    <strong>{response.candidate_name ?? response.resume_title ?? 'Кандидат без имени'}</strong>
                     {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
                     {response.status ? <span>Статус: {response.status}</span> : null}
                   </div>
