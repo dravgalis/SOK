@@ -273,6 +273,49 @@ async def debug_vacancy_responses_raw(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.get('/debug/vacancies/{vacancy_id}/responses/normalized')
+async def debug_vacancy_responses_normalized(
+    vacancy_id: str,
+    access_token: str | None = Cookie(default=None, alias=ACCESS_TOKEN_COOKIE),
+) -> dict[str, object]:
+    token = _require_access_token(access_token)
+    hh_client = HHClient(get_settings())
+
+    try:
+        me = await hh_client.get_current_user(token)
+        employer_id = _extract_employer_id(me)
+        response_result = await hh_client.get_vacancy_responses_with_debug(
+            token,
+            vacancy_id,
+            page=1,
+            per_page=100,
+            employer_id=employer_id,
+        )
+    except HHClientError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    raw_items = response_result.get('items') if isinstance(response_result.get('items'), list) else []
+    normalized_items: list[dict[str, object | None]] = []
+
+    for item in raw_items[:5]:
+        if not isinstance(item, dict):
+            continue
+        mapped = _map_response(item)
+        _, raw_candidate_source = _extract_candidate_name(item)
+        normalized_items.append(
+            {
+                'candidate_name': mapped.get('candidate_name'),
+                'resume_title': mapped.get('resume_title'),
+                'raw_candidate_source': raw_candidate_source,
+            }
+        )
+
+    return {
+        'vacancy_id': vacancy_id,
+        'items': normalized_items,
+    }
+
+
 def _find_vacancy_by_id(items: list[dict[str, object]], vacancy_id: str) -> dict[str, object] | None:
     for item in items:
         if str(item.get('id', '')) == vacancy_id:
@@ -305,27 +348,10 @@ def _map_vacancy(item: dict[str, object], *, archived: bool) -> dict[str, object
 def _map_response(item: dict[str, object]) -> dict[str, object]:
     resume = _extract_first_dict(item, ('resume', 'resume_info', 'cv'))
     applicant = _extract_first_dict(item, ('applicant', 'user', 'candidate'))
-    negotiation = _extract_first_dict(item, ('negotiation', 'negotiations', 'topic'))
     salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
     status = item.get('state') if isinstance(item.get('state'), dict) else item.get('status') if isinstance(item.get('status'), dict) else {}
-    applicant_first_name = _as_string_or_none(applicant.get('first_name'))
-    applicant_last_name = _as_string_or_none(applicant.get('last_name'))
-    resume_first_name = _as_string_or_none(_extract_nested_value(item, ('resume', 'first_name')))
-    resume_last_name = _as_string_or_none(_extract_nested_value(item, ('resume', 'last_name')))
-    negotiation_first_name = _as_string_or_none(negotiation.get('first_name'))
-    negotiation_last_name = _as_string_or_none(negotiation.get('last_name'))
-    candidate_name = (
-        applicant.get('full_name')
-        or applicant.get('name')
-        or ' '.join(part for part in (applicant_first_name, applicant_last_name) if part)
-        or ' '.join(part for part in (resume_first_name, resume_last_name) if part)
-        or ' '.join(part for part in (negotiation_first_name, negotiation_last_name) if part)
-        or _extract_nested_value(item, ('resume', 'owner', 'name'))
-        or _extract_nested_value(item, ('resume', 'owner', 'full_name'))
-        or _extract_nested_value(item, ('applicant', 'full_name'))
-        or _extract_nested_value(item, ('resume', 'first_name'))
-    )
+    candidate_name, _ = _extract_candidate_name(item)
     cover_letter = (
         item.get('cover_letter')
         or item.get('message')
@@ -354,6 +380,53 @@ def _map_response(item: dict[str, object]) -> dict[str, object]:
         'status': _as_string_or_none(status.get('name') or status.get('id')),
         'resume_url': _as_string_or_none(resume_url),
     }
+
+
+def _build_full_name(first_name: object, last_name: object) -> str | None:
+    first = _as_string_or_none(first_name)
+    last = _as_string_or_none(last_name)
+    full_name = ' '.join(part for part in (first, last) if part)
+    return full_name or None
+
+
+def _extract_candidate_name(item: dict[str, object]) -> tuple[str | None, str | None]:
+    direct_name_candidates: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ('applicant.full_name', ('applicant', 'full_name')),
+        ('resume.full_name', ('resume', 'full_name')),
+        ('resume.contact.full_name', ('resume', 'contact', 'full_name')),
+        ('resume.contact.name', ('resume', 'contact', 'name')),
+        ('resume.owner.full_name', ('resume', 'owner', 'full_name')),
+        ('resume.owner.name', ('resume', 'owner', 'name')),
+        ('negotiation.participant.full_name', ('negotiation', 'participant', 'full_name')),
+        ('negotiation.participant.name', ('negotiation', 'participant', 'name')),
+        ('participant.full_name', ('participant', 'full_name')),
+        ('participant.name', ('participant', 'name')),
+        ('contact.full_name', ('contact', 'full_name')),
+        ('contact.name', ('contact', 'name')),
+    )
+
+    for source, path in direct_name_candidates:
+        value = _as_string_or_none(_extract_nested_value(item, path))
+        if value:
+            return value, source
+
+    combined_name_candidates: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+        ('applicant.first_name+last_name', ('applicant', 'first_name'), ('applicant', 'last_name')),
+        ('resume.first_name+last_name', ('resume', 'first_name'), ('resume', 'last_name')),
+        ('resume.contact.first_name+last_name', ('resume', 'contact', 'first_name'), ('resume', 'contact', 'last_name')),
+        ('resume.owner.first_name+last_name', ('resume', 'owner', 'first_name'), ('resume', 'owner', 'last_name')),
+        ('negotiation.first_name+last_name', ('negotiation', 'first_name'), ('negotiation', 'last_name')),
+        ('negotiation.participant.first_name+last_name', ('negotiation', 'participant', 'first_name'), ('negotiation', 'participant', 'last_name')),
+        ('participant.first_name+last_name', ('participant', 'first_name'), ('participant', 'last_name')),
+        ('contact.first_name+last_name', ('contact', 'first_name'), ('contact', 'last_name')),
+    )
+
+    for source, first_path, last_path in combined_name_candidates:
+        full_name = _build_full_name(_extract_nested_value(item, first_path), _extract_nested_value(item, last_path))
+        if full_name:
+            return full_name, source
+
+    return None, None
 
 
 def _extract_first_dict(item: dict[str, object], keys: tuple[str, ...]) -> dict[str, object]:
