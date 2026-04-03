@@ -46,7 +46,7 @@ type VacancyResponsesPayload = {
 };
 
 const DEFAULT_RESPONSES_PER_PAGE = 25;
-const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50] as const;
+const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50, 100, 200] as const;
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -259,31 +259,36 @@ export function VacancyDetailsPage() {
 
           {visibleResponses.length > 0 ? (
             <ul className="responses-list">
-              {visibleResponses.map((response) => (
-                <li key={response.response_id} className="response-card">
-                  <div className="response-row">
-                    <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
-                    {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
-                    {response.status ? <span>Статус: {response.status}</span> : null}
-                  </div>
-                  <div className="response-row">
-                    {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : null}
-                    {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : null}
-                    {response.location ? <span>Локация: {response.location}</span> : null}
-                    {response.response_created_at ? <span>Дата отклика: {formatDate(response.response_created_at)}</span> : null}
-                  </div>
-                  <div className="response-row">
-                    {response.resume_url ? (
-                      <a href={response.resume_url} target="_blank" rel="noreferrer">
-                        Открыть резюме
-                      </a>
-                    ) : null}
-                    {response.phone ? <span>Телефон: {response.phone}</span> : null}
-                    {response.email ? <span>Email: {response.email}</span> : null}
-                  </div>
-                  {response.cover_letter ? <p>Сопроводительное письмо: {response.cover_letter}</p> : null}
-                </li>
-              ))}
+              {visibleResponses.map((response, itemIndex) => {
+                const displayIndex = (responsesPage - 1) * responsesPerPage + itemIndex + 1;
+
+                return (
+                  <li key={response.response_id} className="response-card">
+                    <div className="response-row">
+                      <strong>#{displayIndex}</strong>
+                      <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
+                      {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
+                      {response.status ? <span>Статус: {response.status}</span> : null}
+                    </div>
+                    <div className="response-row">
+                      {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : null}
+                      {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : null}
+                      {response.location ? <span>Локация: {response.location}</span> : null}
+                      {response.response_created_at ? <span>Дата отклика: {formatDate(response.response_created_at)}</span> : null}
+                    </div>
+                    <div className="response-row">
+                      {response.resume_url ? (
+                        <a href={response.resume_url} target="_blank" rel="noreferrer">
+                          Открыть резюме
+                        </a>
+                      ) : null}
+                      {response.phone ? <span>Телефон: {response.phone}</span> : null}
+                      {response.email ? <span>Email: {response.email}</span> : null}
+                    </div>
+                    {response.cover_letter ? <p>Сопроводительное письмо: {response.cover_letter}</p> : null}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <div className="vacancies-empty">
