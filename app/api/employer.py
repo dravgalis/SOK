@@ -375,6 +375,19 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             dedupe_keys.add(dedupe_key)
             raw_items.append(item)
 
+    followup_items = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        payload=payload,
+    )
+    for item in followup_items:
+        dedupe_key = _extract_response_dedupe_key(item)
+        if dedupe_key in dedupe_keys:
+            continue
+        dedupe_keys.add(dedupe_key)
+        raw_items.append(item)
+
     items_before_filtering = len(raw_items)
     source_items = [item for item in raw_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
@@ -462,21 +475,42 @@ async def _discover_response_states(
         if payload.get('_status_code') == 404:
             continue
 
-        for entry in _extract_collection_entries(payload):
-            state_id = entry.get('id')
-            state_name = entry.get('name')
-            if isinstance(state_id, str) and state_id and state_id not in states:
+        for state_id, state_name in _extract_states_from_payload(payload):
+            if state_id not in states:
                 states.append(state_id)
-            if isinstance(state_id, str) and state_id and isinstance(state_name, str) and state_name:
+            if state_name:
                 state_names[state_id] = state_name
 
-        for state in _extract_states_from_collections(payload):
-            if state not in states:
-                states.append(state)
-        for state_id, state_name in _extract_state_names_from_collections(payload).items():
-            state_names[state_id] = state_name
-
     return states, state_names
+
+
+def _extract_states_from_payload(payload: dict) -> list[tuple[str, str | None]]:
+    extracted: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+
+    def push(state_id: object, state_name: object) -> None:
+        if not isinstance(state_id, str) or not state_id:
+            return
+        if state_id in seen:
+            return
+        seen.add(state_id)
+        extracted.append((state_id, state_name if isinstance(state_name, str) and state_name else None))
+
+    state_names = _extract_state_names_from_collections(payload)
+    for state in _extract_states_from_collections(payload):
+        state_name = state_names.get(state)
+        push(state, state_name)
+
+    for key in ('items', 'statuses', 'data'):
+        rows = payload.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            push(row.get('id'), row.get('name'))
+
+    return extracted
 
 
 async def _fetch_negotiations_pages(
@@ -534,6 +568,120 @@ def _extract_collection_entries(collection: dict) -> list[dict]:
     if isinstance(sub_collections, list) and sub_collections:
         return [item for item in sub_collections if isinstance(item, dict)]
     return [collection]
+
+
+def _extract_collection_urls(payload: dict) -> list[str]:
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return []
+
+    urls: list[str] = []
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+        for entry in _extract_collection_entries(collection):
+            for key in ('url', 'items_url', 'negotiations_url'):
+                value = entry.get(key)
+                if isinstance(value, str) and value:
+                    urls.append(value)
+    return urls
+
+
+def _normalize_hh_url_to_path(url_or_path: str) -> str | None:
+    if not url_or_path:
+        return None
+    if url_or_path.startswith('http://') or url_or_path.startswith('https://'):
+        parsed = urlparse(url_or_path)
+        if not parsed.path:
+            return None
+        return f"{parsed.path}{f'?{parsed.query}' if parsed.query else ''}"
+    return url_or_path if url_or_path.startswith('/') else f'/{url_or_path}'
+
+
+async def _fetch_followup_negotiations_from_collections(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    payload: dict,
+) -> list[dict]:
+    collected: list[dict] = []
+    seen_details: set[str] = set()
+
+    for url_or_path in _extract_collection_urls(payload):
+        path = _normalize_hh_url_to_path(url_or_path)
+        if not path:
+            continue
+        page = 0
+        per_page = 50
+        while True:
+            try:
+                page_payload = await _hh_get(
+                    client,
+                    path.split('?', 1)[0],
+                    access_token=access_token,
+                    params={
+                        **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
+                        **_extract_query_params_from_path(path),
+                        'page': str(page),
+                        'per_page': str(per_page),
+                    },
+                    allow_404=True,
+                )
+            except HTTPException:
+                break
+            if page_payload.get('_status_code') == 404:
+                break
+
+            page_items = page_payload.get('items') if isinstance(page_payload.get('items'), list) else []
+            if not page_items:
+                break
+
+            for item in page_items:
+                if not isinstance(item, dict):
+                    continue
+                if _is_real_response_item(item):
+                    collected.append(item)
+                    continue
+                detail_path = _normalize_hh_url_to_path(
+                    str(item.get('negotiation_url') or item.get('url') or '')
+                )
+                if not detail_path or detail_path in seen_details:
+                    continue
+                seen_details.add(detail_path)
+                try:
+                    detail_payload = await _hh_get(client, detail_path, access_token=access_token, allow_404=True)
+                except HTTPException:
+                    continue
+                if detail_payload.get('_status_code') == 404:
+                    continue
+                if _is_real_response_item(detail_payload):
+                    collected.append(detail_payload)
+
+            pages = page_payload.get('pages')
+            if not isinstance(pages, int):
+                break
+            page += 1
+            if page >= pages:
+                break
+
+    return collected
+
+
+def _extract_query_params_from_path(path: str) -> dict[str, str]:
+    if '?' not in path:
+        return {}
+    query = path.split('?', 1)[1]
+    params: dict[str, str] = {}
+    for chunk in query.split('&'):
+        if not chunk:
+            continue
+        if '=' in chunk:
+            key, value = chunk.split('=', 1)
+            params[key] = value
+        else:
+            params[chunk] = ''
+    return params
 
 
 def _extract_summary_by_state(payload: dict, *, state_names: dict[str, str] | None = None) -> list[dict[str, object]]:
