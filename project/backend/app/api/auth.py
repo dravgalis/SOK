@@ -247,6 +247,7 @@ async def get_vacancy_responses(
     payload: dict[str, object] = {
         'vacancy_id': vacancy_id,
         'items': responses,
+        'total': total_count,
         'count': total_count,
         'page': page,
         'per_page': per_page,
