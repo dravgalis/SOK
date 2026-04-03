@@ -99,31 +99,35 @@ class HHClient:
         per_page: int = 100,
         employer_id: str | None = None,
     ) -> dict[str, Any]:
-        hh_endpoint = f'{self.API_BASE_URL}/negotiations'
         hh_page = max(page - 1, 0)
-        call_variants: list[dict[str, str]] = [{'vacancy_id': str(vacancy_id), 'per_page': str(per_page), 'page': str(hh_page)}]
+        endpoint_variants = (
+            f'{self.API_BASE_URL}/negotiations/responses',
+            f'{self.API_BASE_URL}/negotiations',
+        )
+
+        base_params: dict[str, str] = {
+            'vacancy_id': str(vacancy_id),
+            'per_page': str(per_page),
+            'page': str(hh_page),
+            'status': 'any',
+        }
         if employer_id:
-            call_variants.append(
-                {
-                    'vacancy_id': str(vacancy_id),
-                    'employer_id': str(employer_id),
-                    'per_page': str(per_page),
-                    'page': str(hh_page),
-                },
-            )
+            base_params['employer_id'] = str(employer_id)
+
         debug_calls: list[dict[str, Any]] = []
         parse_warning: str | None = None
 
-        for params in call_variants:
+        for endpoint in endpoint_variants:
             payload, meta = await self._request_with_meta(
                 'GET',
-                hh_endpoint,
+                endpoint,
                 access_token=access_token,
-                params=params,
+                params=base_params,
                 allow_statuses={404},
                 debug_context={
                     'operation': 'get_vacancy_responses',
                     'vacancy_id': str(vacancy_id),
+                    'endpoint_variant': endpoint,
                 },
             )
             debug_calls.append(meta)
@@ -134,7 +138,15 @@ class HHClient:
             items = self._extract_response_items(payload)
             found = self._extract_responses_count(payload)
             if items:
-                return {'items': items, 'count': found or len(items), 'debug': {'hh_endpoint': hh_endpoint, 'calls': debug_calls}}
+                return {
+                    'items': items,
+                    'count': found or len(items),
+                    'debug': {
+                        'hh_endpoint': endpoint,
+                        'calls': debug_calls,
+                    },
+                }
+
             if found > 0:
                 parse_warning = f'HH returned found={found}, but items were not parsed.'
 
@@ -142,7 +154,7 @@ class HHClient:
             'items': [],
             'count': 0,
             'debug': {
-                'hh_endpoint': hh_endpoint,
+                'hh_endpoint': endpoint_variants[0],
                 'calls': debug_calls,
                 'parse_warning': parse_warning,
             },

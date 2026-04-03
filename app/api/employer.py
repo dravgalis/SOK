@@ -152,6 +152,7 @@ async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, 
         'count': responses_payload['count'],
         'total_from_vacancy': responses_payload['total_from_vacancy'],
         'hh_total_raw': responses_payload['hh_total_raw'],
+        'detailed_items_count': responses_payload['detailed_items_count'],
         'pages_loaded': responses_payload['pages_loaded'],
         'items_before_filtering': responses_payload['items_before_filtering'],
         'items_after_filtering': responses_payload['items_after_filtering'],
@@ -346,29 +347,36 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
                 seen_ids.add(item_id)
             raw_items.append(item)
 
-    if not raw_items:
-        followup_items = await _fetch_followup_negotiations_from_collections(
-            client,
-            access_token=access_token,
-            payload=payload,
-        )
-        for item in followup_items:
-            item_id = str(item.get('id', '')).strip()
-            if item_id and item_id in seen_ids:
-                continue
-            if item_id:
-                seen_ids.add(item_id)
-            raw_items.append(item)
+    followup_items = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        payload=payload,
+    )
+    for item in followup_items:
+        item_id = str(item.get('id', '')).strip()
+        if item_id and item_id in seen_ids:
+            continue
+        if item_id:
+            seen_ids.add(item_id)
+        raw_items.append(item)
 
     items_before_filtering = len(raw_items)
     source_items = [item for item in raw_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
 
     normalized_items = [_normalize_response(item) for item in source_items]
+    summary_total = sum(
+        summary_item.get('count', 0)
+        for summary_item in summary_by_state
+        if isinstance(summary_item, dict) and isinstance(summary_item.get('count'), int)
+    )
+    total_count = max(total_from_vacancy, hh_total_raw, summary_total, len(normalized_items))
+
     return {
         'items': normalized_items,
         'summary_by_state': summary_by_state,
-        'count': len(normalized_items),
+        'count': total_count,
+        'detailed_items_count': len(normalized_items),
         'total_from_vacancy': total_from_vacancy,
         'hh_total_raw': hh_total_raw,
         'pages_loaded': pages_loaded,
@@ -715,15 +723,66 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
 
     return {
         'response_id': str(item.get('id', '')),
-        'candidate_name': applicant.get('full_name') if isinstance(applicant.get('full_name'), str) else applicant.get('name') if isinstance(applicant.get('name'), str) else None,
+        'candidate_name': _extract_candidate_name(item, applicant, resume),
         'resume_title': resume.get('title') if isinstance(resume.get('title'), str) else None,
         'age': age,
         'expected_salary': expected_salary,
         'location': area.get('name') if isinstance(area.get('name'), str) else None,
         'response_created_at': str(item.get('created_at')) if item.get('created_at') else None,
         'cover_letter': item.get('cover_letter') if isinstance(item.get('cover_letter'), str) else item.get('message') if isinstance(item.get('message'), str) else None,
-        'status': state.get('name') if isinstance(state.get('name'), str) else state.get('id') if isinstance(state.get('id'), str) else None,
+        'status': _extract_status_label(item, state),
         'resume_url': resume_url,
         'phone': phone,
         'email': email,
     }
+
+
+def _extract_candidate_name(item: dict, applicant: dict, resume: dict) -> str | None:
+    candidate_name = applicant.get('full_name') if isinstance(applicant.get('full_name'), str) else None
+    if not candidate_name:
+        candidate_name = applicant.get('name') if isinstance(applicant.get('name'), str) else None
+    if not candidate_name:
+        first_name = applicant.get('first_name') if isinstance(applicant.get('first_name'), str) else None
+        last_name = applicant.get('last_name') if isinstance(applicant.get('last_name'), str) else None
+        candidate_name = ' '.join(part for part in (first_name, last_name) if part) or None
+    if not candidate_name:
+        owner = resume.get('owner') if isinstance(resume.get('owner'), dict) else {}
+        owner_full_name = owner.get('full_name') if isinstance(owner.get('full_name'), str) else None
+        if owner_full_name:
+            candidate_name = owner_full_name
+        else:
+            owner_first = owner.get('first_name') if isinstance(owner.get('first_name'), str) else None
+            owner_last = owner.get('last_name') if isinstance(owner.get('last_name'), str) else None
+            candidate_name = ' '.join(part for part in (owner_first, owner_last) if part) or None
+    if not candidate_name:
+        contact = item.get('contact') if isinstance(item.get('contact'), dict) else {}
+        contact_name = contact.get('name') if isinstance(contact.get('name'), str) else None
+        if contact_name:
+            candidate_name = contact_name
+    return candidate_name
+
+
+def _extract_status_label(item: dict, state: dict) -> str | None:
+    state_name = item.get('state_name') if isinstance(item.get('state_name'), str) else item.get('status_name') if isinstance(item.get('status_name'), str) else None
+    if state_name:
+        return state_name
+
+    local_status_map = {
+        'response': 'Отклик',
+        'invitation': 'Приглашение',
+        'interview': 'Собеседование',
+        'offer': 'Оффер',
+        'hired': 'Выход',
+        'discarded': 'Отказ',
+    }
+
+    state_id = state.get('id') if isinstance(state.get('id'), str) else None
+    mapped_name = local_status_map.get(state_id) if state_id else None
+    if mapped_name:
+        return mapped_name
+
+    raw_name = state.get('name') if isinstance(state.get('name'), str) else None
+    if raw_name and raw_name.strip() and raw_name != 'Остальные':
+        return raw_name
+
+    return state_id or raw_name
