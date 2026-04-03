@@ -38,6 +38,7 @@ type ResponsesSummaryItem = {
 type VacancyResponsesPayload = {
   items: VacancyResponse[];
   summary_by_state?: ResponsesSummaryItem[];
+  total?: number;
   count?: number;
   page?: number;
   per_page?: number;
@@ -131,7 +132,14 @@ export function VacancyDetailsPage() {
         setVacancy(vacancyPayload);
         setResponses(Array.isArray(responsesPayload.items) ? responsesPayload.items : []);
         setSummaryByState(Array.isArray(responsesPayload.summary_by_state) ? responsesPayload.summary_by_state : []);
-        setResponsesCount(typeof responsesPayload.count === 'number' ? responsesPayload.count : 0);
+        const totalResponses =
+          typeof responsesPayload.total === 'number'
+            ? responsesPayload.total
+            : typeof responsesPayload.count === 'number'
+              ? responsesPayload.count
+              : 0;
+
+        setResponsesCount(totalResponses);
         setResponsesPages(typeof responsesPayload.pages === 'number' ? responsesPayload.pages : 1);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
@@ -204,7 +212,7 @@ export function VacancyDetailsPage() {
             <span>Статус: {vacancyStatus}</span>
             <span>Дата публикации: {formatDate(vacancy.published_at)}</span>
             <span>Дата архивирования: {formatDate(vacancy.archived_at)}</span>
-            <span>Отклики: {responsesCount || vacancy.responses_count || visibleResponses.length}</span>
+            <span>Отклики: {Math.max(responsesCount, vacancy.responses_count ?? 0, visibleResponses.length)}</span>
           </div>
         </header>
 
@@ -254,7 +262,7 @@ export function VacancyDetailsPage() {
               {visibleResponses.map((response) => (
                 <li key={response.response_id} className="response-card">
                   <div className="response-row">
-                    <strong>{response.candidate_name ?? response.resume_title ?? 'Кандидат без имени'}</strong>
+                    <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
                     {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
                     {response.status ? <span>Статус: {response.status}</span> : null}
                   </div>
