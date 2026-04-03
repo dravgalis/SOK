@@ -909,9 +909,9 @@ def _extract_candidate_name(item: dict, applicant: dict, candidate: dict, resume
         direct_candidates.append(owner.get('full_name'))
         direct_candidates.append(owner.get('name'))
 
-    for candidate in direct_candidates:
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
+    for candidate_name in direct_candidates:
+        if isinstance(candidate_name, str) and candidate_name.strip():
+            return candidate_name.strip()
 
     combined_name_sources: list[tuple[object, object]] = [
         (applicant.get('first_name'), applicant.get('last_name')),
