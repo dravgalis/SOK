@@ -138,21 +138,38 @@ async def get_vacancy_by_id(vacancy_id: str, request: Request) -> dict[str, obje
 
 
 @router.get('/vacancies/{vacancy_id}/responses')
-async def get_vacancy_responses(vacancy_id: str, request: Request) -> dict[str, object]:
+async def get_vacancy_responses(
+    vacancy_id: str,
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    per_page: int = Query(default=25, ge=1, le=100),
+) -> dict[str, object]:
     access_token = _require_access_token(request)
 
     async with httpx.AsyncClient(timeout=20.0) as client:
         responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
 
+    all_items = responses_payload['items'] if isinstance(responses_payload['items'], list) else []
+    detailed_items_count = responses_payload['detailed_items_count'] if isinstance(responses_payload['detailed_items_count'], int) else len(all_items)
+
+    pages = max((detailed_items_count + per_page - 1) // per_page, 1)
+    resolved_page = min(page, pages)
+    start_index = (resolved_page - 1) * per_page
+    end_index = start_index + per_page
+    paginated_items = all_items[start_index:end_index]
+
     return {
         'vacancy_id': vacancy_id,
-        'items': responses_payload['items'],
+        'items': paginated_items,
         'summary_by_state': responses_payload['summary_by_state'],
         'total': responses_payload['count'],
         'count': responses_payload['count'],
+        'page': resolved_page,
+        'per_page': per_page,
+        'pages': pages,
         'total_from_vacancy': responses_payload['total_from_vacancy'],
         'hh_total_raw': responses_payload['hh_total_raw'],
-        'detailed_items_count': responses_payload['detailed_items_count'],
+        'detailed_items_count': detailed_items_count,
         'pages_loaded': responses_payload['pages_loaded'],
         'items_before_filtering': responses_payload['items_before_filtering'],
         'items_after_filtering': responses_payload['items_after_filtering'],
@@ -738,28 +755,43 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
 
 
 def _extract_candidate_name(item: dict, applicant: dict, resume: dict) -> str | None:
-    candidate_name = applicant.get('full_name') if isinstance(applicant.get('full_name'), str) else None
-    if not candidate_name:
-        candidate_name = applicant.get('name') if isinstance(applicant.get('name'), str) else None
-    if not candidate_name:
-        first_name = applicant.get('first_name') if isinstance(applicant.get('first_name'), str) else None
-        last_name = applicant.get('last_name') if isinstance(applicant.get('last_name'), str) else None
-        candidate_name = ' '.join(part for part in (first_name, last_name) if part) or None
-    if not candidate_name:
-        owner = resume.get('owner') if isinstance(resume.get('owner'), dict) else {}
-        owner_full_name = owner.get('full_name') if isinstance(owner.get('full_name'), str) else None
-        if owner_full_name:
-            candidate_name = owner_full_name
-        else:
-            owner_first = owner.get('first_name') if isinstance(owner.get('first_name'), str) else None
-            owner_last = owner.get('last_name') if isinstance(owner.get('last_name'), str) else None
-            candidate_name = ' '.join(part for part in (owner_first, owner_last) if part) or None
-    if not candidate_name:
-        contact = item.get('contact') if isinstance(item.get('contact'), dict) else {}
-        contact_name = contact.get('name') if isinstance(contact.get('name'), str) else None
-        if contact_name:
-            candidate_name = contact_name
-    return candidate_name
+    direct_candidates: list[object] = [
+        applicant.get('full_name'),
+        applicant.get('name'),
+        resume.get('full_name'),
+    ]
+
+    contact = item.get('contact') if isinstance(item.get('contact'), dict) else {}
+    if isinstance(contact, dict):
+        direct_candidates.append(contact.get('full_name'))
+        direct_candidates.append(contact.get('name'))
+
+    owner = resume.get('owner') if isinstance(resume.get('owner'), dict) else {}
+    if isinstance(owner, dict):
+        direct_candidates.append(owner.get('full_name'))
+        direct_candidates.append(owner.get('name'))
+
+    for candidate in direct_candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+
+    combined_name_sources: list[tuple[object, object]] = [
+        (applicant.get('first_name'), applicant.get('last_name')),
+        (resume.get('first_name'), resume.get('last_name')),
+    ]
+    if isinstance(owner, dict):
+        combined_name_sources.append((owner.get('first_name'), owner.get('last_name')))
+    if isinstance(contact, dict):
+        combined_name_sources.append((contact.get('first_name'), contact.get('last_name')))
+
+    for first_name_raw, last_name_raw in combined_name_sources:
+        first_name = first_name_raw.strip() if isinstance(first_name_raw, str) else ''
+        last_name = last_name_raw.strip() if isinstance(last_name_raw, str) else ''
+        full_name = ' '.join(part for part in (first_name, last_name) if part)
+        if full_name:
+            return full_name
+
+    return None
 
 
 def _extract_status_label(item: dict, state: dict) -> str | None:
