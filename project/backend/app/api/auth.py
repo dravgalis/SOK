@@ -393,6 +393,7 @@ def _build_full_name(first_name: object, last_name: object) -> str | None:
 def _extract_candidate_name(item: dict[str, object]) -> tuple[str | None, str | None]:
     direct_name_candidates: tuple[tuple[str, tuple[str, ...]], ...] = (
         ('applicant.full_name', ('applicant', 'full_name')),
+        ('applicant.name', ('applicant', 'name')),
         ('resume.full_name', ('resume', 'full_name')),
         ('resume.contact.full_name', ('resume', 'contact', 'full_name')),
         ('resume.contact.name', ('resume', 'contact', 'name')),
