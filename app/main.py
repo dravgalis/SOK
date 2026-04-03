@@ -1,13 +1,26 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import auth, debug, employer
 
+FRONTEND_ORIGIN = 'https://sok-app.onrender.com'
+
+
+def _resolve_cors_origins() -> list[str]:
+    raw = os.getenv('CORS_ORIGINS', FRONTEND_ORIGIN)
+    parsed = [origin.strip() for origin in raw.split(',') if origin.strip()]
+    if FRONTEND_ORIGIN not in parsed:
+        parsed.append(FRONTEND_ORIGIN)
+    return parsed
+
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['https://sok-app.onrender.com'],
+    allow_origins=_resolve_cors_origins(),
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
