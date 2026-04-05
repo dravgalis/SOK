@@ -340,10 +340,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         access_token=access_token,
         params={
             'vacancy_id': vacancy_id,
-            'status': 'any',
             'page': '0',
             'per_page': '1',
-            'all': 'true',
         },
         allow_404=True,
     )
@@ -793,7 +791,8 @@ async def _fetch_negotiations_by_params(
     page_counts: list[dict[str, int]] = []
     raw_ids: list[str] = []
     normalized_params = dict(params)
-    normalized_params['status'] = 'any'
+    if 'status' not in normalized_params:
+        normalized_params['status'] = 'any'
 
     first_payload = await _hh_get(
         client,
@@ -804,7 +803,6 @@ async def _fetch_negotiations_by_params(
             **normalized_params,
             'page': '0',
             'per_page': str(per_page),
-            'all': 'true',
         },
         allow_404=True,
     )
@@ -838,7 +836,6 @@ async def _fetch_negotiations_by_params(
                     **normalized_params,
                     'page': str(page),
                     'per_page': str(per_page),
-                    'all': 'true',
                 },
                 allow_404=True,
             )
