@@ -345,83 +345,40 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     if seed_payload.get('_status_code') == 404:
         seed_payload = {}
 
-    discovered_states_raw, discovered_states_normalized, state_names = await _discover_response_states(
+    direct_items, direct_pages_loaded, direct_raw_total, direct_page_counts, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
-        seed_payload=seed_payload,
+        params={},
+        expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
     )
 
-    states_processed_raw: list[str] = []
-    states_processed_normalized: list[str] = []
-    raw_items: list[dict] = []
+    collection_items, collection_debug = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        payload=seed_payload,
+    )
+
+    merged_raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
     duplicates_skipped = 0
 
-    for state in discovered_states_normalized:
-        params = {'status': state} if state else {}
-        variant_items, variant_pages_loaded, variant_raw_total, _, _ = await _fetch_negotiations_by_params(
-            client,
-            access_token=access_token,
-            vacancy_id=vacancy_id,
-            params=params,
-        )
-        matching_raw_states = [raw for raw in discovered_states_raw if _normalize_state_alias(raw) == state]
-        state_raw = matching_raw_states[0] if matching_raw_states else state
-        states_processed_raw.append(state_raw or 'no_status')
-        states_processed_normalized.append(state or 'no_status')
-
-        added = 0
-        for item in variant_items:
+    for source_items in (direct_items, collection_items):
+        for item in source_items:
             raw_key = _extract_response_dedupe_key(item)
             if raw_key in seen_raw_keys:
                 duplicates_skipped += 1
                 continue
             seen_raw_keys.add(raw_key)
-            raw_items.append(item)
-            added += 1
-
-        logger.info(
-            'HH responses debug: vacancy_id=%s state=%s fetched=%s added=%s pages_loaded=%s raw_total=%s',
-            vacancy_id,
-            state,
-            len(variant_items),
-            added,
-            variant_pages_loaded,
-            variant_raw_total,
-        )
-
-    if 'any' not in discovered_states_normalized:
-        fallback_items, variant_pages_loaded, variant_raw_total, _, _ = await _fetch_negotiations_by_params(
-            client,
-            access_token=access_token,
-            vacancy_id=vacancy_id,
-            params={'status': 'any'},
-        )
-        states_processed_raw.append('any')
-        states_processed_normalized.append('any')
-        for item in fallback_items:
-            raw_key = _extract_response_dedupe_key(item)
-            if raw_key in seen_raw_keys:
-                duplicates_skipped += 1
-                continue
-            seen_raw_keys.add(raw_key)
-            raw_items.append(item)
-        logger.info(
-            'HH responses debug: vacancy_id=%s state=%s fetched=%s pages_loaded=%s raw_total=%s',
-            vacancy_id,
-            'any',
-            len(fallback_items),
-            variant_pages_loaded,
-            variant_raw_total,
-        )
+            merged_raw_items.append(item)
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
     raw_items_without_id = 0
     duplicate_items = 0
 
-    for item in raw_items:
+    for item in merged_raw_items:
         normalized_item = _normalize_response(item)
         response_id = normalized_item.get('response_id')
         if not isinstance(response_id, str) or not response_id:
@@ -433,50 +390,48 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         seen_response_ids.add(response_id)
         unique_items.append(normalized_item)
 
-    logger.info(
-        'HH responses debug: vacancy_id=%s raw_items=%s unique_items=%s duplicates=%s missing_response_id=%s sample_ids=%s',
-        vacancy_id,
-        len(raw_items),
-        len(unique_items),
-        duplicate_items,
-        raw_items_without_id,
-        list(seen_response_ids)[:10],
-    )
-
-    summary_by_state = _extract_summary_by_state(seed_payload, state_names=state_names)
+    summary_by_state = _extract_summary_by_state(seed_payload)
     summary_counts_map, _ = _aggregate_summary_by_state(summary_by_state)
     summary_total = sum(summary_counts_map.values())
     hh_total_raw = _extract_hh_total_raw(seed_payload)
     hh_total = hh_total_from_vacancy if hh_total_from_vacancy > 0 else (summary_total if summary_total > 0 else hh_total_raw)
     loaded_count = len(unique_items)
-    has_gap = hh_total > 0 and loaded_count < hh_total
-    collection_failure = hh_total > 0 and loaded_count == 0
-    visibility_gap = has_gap and not collection_failure
+
+    collection_errors = collection_debug.get('errors', [])
+    collection_errors_count = len(collection_errors) if isinstance(collection_errors, list) else 0
+    collection_has_candidates = len(collection_items) > 0
+
+    has_gap = hh_total > 0 and loaded_count == 0
+    gap_reason = (
+        'Не удалось собрать отклики кандидатов ни через /negotiations, ни через collections URLs.'
+        if has_gap
+        else None
+    )
 
     return {
         'items': unique_items,
         'loaded_count': loaded_count,
         'hh_total': hh_total,
         'has_gap': has_gap,
-        'gap_reason': (
-            'HH API returns fewer detailed negotiations than vacancy counter (permissions / hidden / archived)'
-            if has_gap
-            else None
-        ),
+        'gap_reason': gap_reason,
         'summary_total_raw': summary_total,
         'state_alias_groups': [],
         'debug': {
-            'states_processed': states_processed_normalized,
-            'states_processed_raw': states_processed_raw,
-            'states_processed_normalized': states_processed_normalized,
-            'discovered_states_raw': discovered_states_raw,
-            'discovered_states_normalized': discovered_states_normalized,
+            'direct_items_count': len(direct_items),
+            'direct_pages_loaded': direct_pages_loaded,
+            'direct_raw_total': direct_raw_total,
+            'direct_page_counts': direct_page_counts,
+            'collection_items_count': len(collection_items),
+            'collection_urls_processed': collection_debug.get('urls_processed', 0),
+            'collection_pages_loaded': collection_debug.get('pages_loaded', 0),
+            'collection_errors': collection_errors,
+            'collection_errors_count': collection_errors_count,
+            'collection_has_candidates': collection_has_candidates,
             'duplicates_skipped': duplicates_skipped + duplicate_items,
             'missing_items': max(hh_total - loaded_count, 0),
             'summary_total': summary_total,
             'hh_total_raw': hh_total_raw,
-            'visibility_gap': visibility_gap,
-            'collection_failure': collection_failure,
+            'collection_failure': loaded_count == 0,
         },
     }
 

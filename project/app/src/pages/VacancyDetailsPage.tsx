@@ -40,6 +40,8 @@ type VacancyResponsesPayload = {
   summary_by_state?: ResponsesSummaryItem[];
   total?: number;
   count?: number;
+  loaded_count?: number;
+  hh_total?: number;
   page?: number;
   per_page?: number;
   pages?: number;
@@ -87,6 +89,7 @@ export function VacancyDetailsPage() {
   const [responsesPage, setResponsesPage] = useState(1);
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
+  const [hhTotalCount, setHhTotalCount] = useState<number | null>(null);
   const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -132,14 +135,24 @@ export function VacancyDetailsPage() {
         setVacancy(vacancyPayload);
         setResponses(Array.isArray(responsesPayload.items) ? responsesPayload.items : []);
         setSummaryByState(Array.isArray(responsesPayload.summary_by_state) ? responsesPayload.summary_by_state : []);
-        const totalResponses =
-          typeof responsesPayload.total === 'number'
-            ? responsesPayload.total
-            : typeof responsesPayload.count === 'number'
-              ? responsesPayload.count
-              : 0;
+        const loadedResponses =
+          typeof responsesPayload.loaded_count === 'number'
+            ? responsesPayload.loaded_count
+            : typeof responsesPayload.total === 'number'
+              ? responsesPayload.total
+              : typeof responsesPayload.count === 'number'
+                ? responsesPayload.count
+                : 0;
 
-        setResponsesCount(totalResponses);
+        const hhTotal =
+          typeof responsesPayload.hh_total === 'number'
+            ? responsesPayload.hh_total
+            : typeof vacancyPayload.responses_count === 'number'
+              ? vacancyPayload.responses_count
+              : null;
+
+        setResponsesCount(loadedResponses);
+        setHhTotalCount(hhTotal);
         setResponsesPages(typeof responsesPayload.pages === 'number' ? responsesPayload.pages : 1);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
@@ -212,7 +225,11 @@ export function VacancyDetailsPage() {
             <span>Статус: {vacancyStatus}</span>
             <span>Дата публикации: {formatDate(vacancy.published_at)}</span>
             <span>Дата архивирования: {formatDate(vacancy.archived_at)}</span>
-            <span>Отклики: {Math.max(responsesCount, vacancy.responses_count ?? 0, visibleResponses.length)}</span>
+            <span>Отклики (доступно): {responsesCount}</span>
+            {typeof hhTotalCount === 'number' ? <span>По счётчику HH: {hhTotalCount}</span> : null}
+            {typeof hhTotalCount === 'number' && responsesCount < hhTotalCount ? (
+              <span>Доступно меньше, чем в счётчике HH: {responsesCount} из {hhTotalCount}</span>
+            ) : null}
           </div>
         </header>
 
