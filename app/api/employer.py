@@ -389,7 +389,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         params={'status': 'any'},
         expected_count_hint=total_from_vacancy,
     )
-    summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
+    summary_by_state = _extract_summary_by_state(payload)
     summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     deduped_items: list[dict] = []
