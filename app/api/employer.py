@@ -389,11 +389,64 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         params={'status': 'any'},
         expected_count_hint=total_from_vacancy,
     )
+    summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
+    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     deduped_items: list[dict] = []
     dedupe_keys: set[str] = set()
     duplicates_skipped_total = 0
-    for item in raw_items:
+
+    for state in states_processed:
+        expected_count_hint = summary_counts_raw_for_fetch.get(state)
+        state_items, state_pages, state_total, page_counts, state_raw_ids = await _fetch_negotiations_pages(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            state=state,
+            expected_count_hint=expected_count_hint if isinstance(expected_count_hint, int) else None,
+        )
+        pages_loaded += state_pages
+        if isinstance(state_total, int):
+            hh_total_raw = max(hh_total_raw, state_total)
+
+        state_added = 0
+        state_duplicates = 0
+        duplicate_ids: list[str] = []
+        for item in state_items:
+            dedupe_key = _extract_response_dedupe_key(item)
+            if dedupe_key in dedupe_keys:
+                state_duplicates += 1
+                duplicate_ids.append(dedupe_key)
+                continue
+            dedupe_keys.add(dedupe_key)
+            raw_items.append(item)
+            state_added += 1
+
+        duplicates_skipped_total += state_duplicates
+        logical_state = _normalize_state_alias(state)
+        state_fetch_diagnostics.append(
+            {
+                'state': state,
+                'logical_state': logical_state,
+                'pages_loaded': state_pages,
+                'page_counts': page_counts,
+                'fetched_raw_count': len(state_items),
+                'raw_ids': state_raw_ids,
+                'raw_ids_before_dedupe': len(state_raw_ids),
+                'added_after_dedupe': state_added,
+                'duplicates_skipped': state_duplicates,
+                'duplicate_ids': duplicate_ids,
+                'state_total_raw': state_total,
+            }
+        )
+
+    followup_items, followup_debug = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        payload=payload,
+    )
+    for item in followup_items:
         dedupe_key = _extract_response_dedupe_key(item)
         if dedupe_key in dedupe_keys:
             duplicates_skipped_total += 1
@@ -401,28 +454,89 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         dedupe_keys.add(dedupe_key)
         deduped_items.append(item)
 
+    fallback_fetches: list[dict[str, object]] = []
+    primary_total_for_gap = total_from_vacancy
+    primary_source_items = [item for item in raw_items if _is_real_response_item(item)]
+    primary_missing = max(primary_total_for_gap - len(primary_source_items), 0)
+    if primary_missing > 0:
+        fallback_items, fallback_info = await _fetch_missing_negotiations_fallback(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            expected_total=primary_total_for_gap,
+            existing_items=raw_items,
+            existing_dedupe_keys=dedupe_keys,
+        )
+        raw_items.extend(fallback_items)
+        fallback_fetches = fallback_info
+
     items_before_filtering = len(deduped_items)
     source_items = [item for item in deduped_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
+
+    fetched_counts_map = _count_items_by_state(source_items)
+    summary_counts_map, summary_names_map = _aggregate_summary_by_state(summary_by_state)
+    summary_counts_raw_map, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
+    summary_total = sum(summary_counts_map.values())
+    summary_total_raw = sum(summary_counts_raw_map.values())
+    alias_groups = _build_state_alias_groups(
+        summary_counts_raw_map=summary_counts_raw_map,
+        summary_names_map=summary_names_map,
+        fetched_counts_map=fetched_counts_map,
+    )
+
+    state_diagnostics = _build_state_diagnostics(
+        summary_counts_map=summary_counts_map,
+        fetched_counts_map=fetched_counts_map,
+        summary_names_map=summary_names_map,
+        state_names=state_names,
+        state_fetch_diagnostics=state_fetch_diagnostics,
+    )
+    missing_by_state = [row for row in state_diagnostics if row.get('missing_count', 0) > 0]
+    fetched_by_state = [
+        {
+            'state': state,
+            'state_name': summary_names_map.get(state) or state_names.get(state) or state,
+            'count': count,
+        }
+        for state, count in sorted(fetched_counts_map.items(), key=lambda item: item[0])
+    ]
+    collection_diagnostics = _enrich_collection_diagnostics(
+        raw_collection_diagnostics=followup_debug['collection_diagnostics'],
+        summary_counts_map=summary_counts_map,
+        fetched_counts_map=fetched_counts_map,
+    )
+
     normalized_items = [_normalize_response(item) for item in source_items]
     total_count = len(normalized_items)
     missing_items_count = max(total_from_vacancy - total_count, 0)
 
     visibility_gap_note = None
+    api_limitation_states = [
+        row for row in state_diagnostics
+        if row.get('hh_state_total_raw') is not None
+        and isinstance(row.get('expected_count'), int)
+        and isinstance(row.get('hh_state_total_raw'), int)
+        and row['hh_state_total_raw'] < row['expected_count']
+    ]
     if missing_items_count > 0:
         visibility_gap_note = (
-            'HH negotiations status=any returned fewer detailed items than vacancy counter. '
-            f'vacancy_total={total_from_vacancy}, detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}.'
+            'Summary/vacancy counters include responses that are not returned by detailed negotiations endpoints. '
+            'Likely reasons: permissions, archived/hidden negotiations, or HH API visibility rules. '
+            f'vacancy_total={total_from_vacancy}, any_status_total={any_status_total_raw}, '
+            f'detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}, '
+            f'missing_states={len(visibility_restricted_states)}, '
+            f'api_limitation_states={len(api_limitation_states)}.'
         )
 
     return {
         'items': normalized_items,
-        'summary_by_state': [],
-        'summary_total': 0,
-        'summary_total_raw': 0,
-        'state_alias_groups': [],
-        'fetched_by_state': [],
-        'missing_by_state': [],
+        'summary_by_state': summary_by_state,
+        'summary_total': summary_total,
+        'summary_total_raw': summary_total_raw,
+        'state_alias_groups': alias_groups,
+        'fetched_by_state': fetched_by_state,
+        'missing_by_state': missing_by_state,
         'missing_items_count': missing_items_count,
         'state_diagnostics': [],
         'state_fetch_diagnostics': [
@@ -453,8 +567,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         'vacancy_vs_any_gap': max(total_from_vacancy - (hh_total_raw if isinstance(hh_total_raw, int) else 0), 0),
         'visibility_gap_note': visibility_gap_note,
         'can_fetch_all_detailed_items': missing_items_count == 0,
-        'api_limitation_states': [],
-        'fallback_fetches': [],
+        'api_limitation_states': api_limitation_states,
+        'fallback_fetches': fallback_fetches,
     }
 
 
