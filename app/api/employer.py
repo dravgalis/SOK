@@ -330,16 +330,30 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
+    raw_items_without_id = 0
+    duplicate_items = 0
 
     for item in raw_items:
         normalized_item = _normalize_response(item)
         response_id = normalized_item.get('response_id')
         if not isinstance(response_id, str) or not response_id:
+            raw_items_without_id += 1
             continue
         if response_id in seen_response_ids:
+            duplicate_items += 1
             continue
         seen_response_ids.add(response_id)
         unique_items.append(normalized_item)
+
+    logger.info(
+        'HH responses debug: vacancy_id=%s raw_items=%s unique_items=%s duplicates=%s missing_response_id=%s sample_ids=%s',
+        vacancy_id,
+        len(raw_items),
+        len(unique_items),
+        duplicate_items,
+        raw_items_without_id,
+        list(seen_response_ids)[:10],
+    )
 
     return {
         'items': unique_items,
@@ -670,19 +684,21 @@ async def _fetch_negotiations_by_params(
     raw_ids: list[str] = []
 
     while True:
+        request_params = {
+            'vacancy_id': vacancy_id,
+            **params,
+            'page': str(page),
+            'per_page': str(per_page),
+        }
         payload = await _hh_get(
             client,
             '/negotiations',
             access_token=access_token,
-            params={
-                'vacancy_id': vacancy_id,
-                **params,
-                'page': str(page),
-                'per_page': str(per_page),
-            },
+            params=request_params,
             allow_404=True,
         )
         if payload.get('_status_code') == 404:
+            logger.info('HH negotiations debug: vacancy_id=%s params=%s status=404', vacancy_id, request_params)
             break
 
         pages_loaded += 1
@@ -706,6 +722,14 @@ async def _fetch_negotiations_by_params(
         ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else None
 
         page += 1
+        logger.info(
+            'HH negotiations debug: vacancy_id=%s params=%s page_items=%s pages_loaded=%s raw_total=%s',
+            vacancy_id,
+            request_params,
+            len(page_items) if isinstance(page_items, list) else 0,
+            pages_loaded,
+            raw_total,
+        )
         if max_pages_hint is not None and page >= max_pages_hint:
             break
         if not page_items:
