@@ -358,12 +358,13 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
     )
 
-    collection_items, collection_debug = await _fetch_followup_negotiations_from_collections(
-        client,
-        access_token=access_token,
-        vacancy_id=vacancy_id,
-        payload=seed_payload,
-    )
+    # Временно отключаем collections-поток для снижения нагрузки и задержек.
+    collection_items: list[dict] = []
+    collection_debug: dict[str, object] = {
+        'urls_processed': 0,
+        'pages_loaded': 0,
+        'errors': [],
+    }
 
     merged_raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
@@ -377,6 +378,9 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
                 continue
             seen_raw_keys.add(raw_key)
             merged_raw_items.append(item)
+
+    if len(merged_raw_items) > 50:
+        merged_raw_items = merged_raw_items[:50]
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -404,6 +408,14 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             continue
         seen_response_ids.add(response_id)
         unique_items.append(normalized_item)
+
+    logger.info(
+        'HH responses perf: vacancy_id=%s direct_pages_loaded=%s merged_candidates=%s unique_candidates=%s',
+        vacancy_id,
+        direct_pages_loaded,
+        len(merged_raw_items),
+        len(unique_items),
+    )
 
     summary_by_state = _extract_summary_by_state(seed_payload)
     summary_counts_map, _ = _aggregate_summary_by_state(summary_by_state)
@@ -813,7 +825,7 @@ async def _fetch_negotiations_by_params(
     max_pages_hint = max(
         value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
     ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else 1
-    max_pages_hint = min(max_pages_hint, 200)
+    max_pages_hint = min(max_pages_hint, 5)
 
     if max_pages_hint > 1:
         page_tasks = [
@@ -1886,10 +1898,18 @@ async def _fetch_resumes_profiles(
         if resume_id:
             resume_ids.add(resume_id)
 
+    resume_id_list = sorted(resume_ids)
+    tasks = [
+        _hh_get(client, f'/resumes/{resume_id}', access_token=access_token, allow_404=True)
+        for resume_id in resume_id_list
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     profiles: dict[str, dict] = {}
-    for resume_id in resume_ids:
-        payload = await _hh_get(client, f'/resumes/{resume_id}', access_token=access_token, allow_404=True)
-        if payload.get('_status_code') == 404:
+    for resume_id, payload in zip(resume_id_list, results):
+        if isinstance(payload, Exception):
+            continue
+        if not isinstance(payload, dict) or payload.get('_status_code') == 404:
             continue
         profiles[resume_id] = payload
     return profiles
