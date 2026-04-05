@@ -149,8 +149,18 @@ async def get_vacancy_responses(
 ) -> dict[str, object]:
     access_token = _require_access_token(request)
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        all_items = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception('Unexpected error while loading vacancy responses: vacancy_id=%s', vacancy_id)
+        raise HTTPException(status_code=502, detail='Failed to load vacancy responses from HH API.') from exc
+
+    all_items = responses_payload.get('items')
+    if not isinstance(all_items, list):
+        all_items = []
     total = len(all_items)
 
     if all:
@@ -174,6 +184,8 @@ async def get_vacancy_responses(
         'page': resolved_page,
         'per_page': effective_per_page,
         'pages': pages,
+        'summary_total_raw': responses_payload.get('summary_total_raw', 0),
+        'state_alias_groups': responses_payload.get('state_alias_groups', []),
         'full_export': all,
     }
 
@@ -196,11 +208,14 @@ async def _hh_get(
     url = f'{HH_API_BASE}{path}'
     logger.info('HH request debug: url=%s params=%s', url, params)
 
-    response = await client.get(
-        url,
-        headers={'Authorization': f'Bearer {access_token}'},
-        params=params,
-    )
+    try:
+        response = await client.get(
+            url,
+            headers={'Authorization': f'Bearer {access_token}'},
+            params=params,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f'HH API request failed on {path}.') from exc
 
     logger.info('HH response debug: url=%s status_code=%s', url, response.status_code)
 
@@ -215,7 +230,11 @@ async def _hh_get(
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=f'HH API error on {path}: {response.text}') from exc
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f'HH API returned invalid JSON for {path}.') from exc
+
     if not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail=f'HH API returned non-object payload for {path}.')
 
@@ -301,15 +320,13 @@ async def _fetch_paginated_vacancies(
     return all_items
 
 
-async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> list[dict[str, object | None]]:
+async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
     raw_items, _, _, _, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
         params={'status': 'any'},
     )
-    summary_by_state = _extract_summary_by_state(payload)
-    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -324,7 +341,11 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         seen_response_ids.add(response_id)
         unique_items.append(normalized_item)
 
-    return unique_items
+    return {
+        'items': unique_items,
+        'summary_total_raw': 0,
+        'state_alias_groups': [],
+    }
 
 
 def _count_items_by_state(items: list[dict]) -> dict[str, int]:
