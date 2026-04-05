@@ -321,12 +321,41 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
-    raw_items, _, _, _, _ = await _fetch_negotiations_by_params(
-        client,
-        access_token=access_token,
-        vacancy_id=vacancy_id,
-        params={'status': 'any'},
-    )
+    raw_items: list[dict] = []
+    seen_raw_keys: set[str] = set()
+    fetch_variants: list[tuple[str, dict[str, str]]] = [
+        ('status_any', {'status': 'any'}),
+        ('no_status', {}),
+    ]
+
+    for variant_name, variant_params in fetch_variants:
+        variant_items, variant_pages_loaded, variant_raw_total, _, _ = await _fetch_negotiations_by_params(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            params=variant_params,
+        )
+        added = 0
+        for item in variant_items:
+            raw_key = _extract_response_dedupe_key(item)
+            if raw_key in seen_raw_keys:
+                continue
+            seen_raw_keys.add(raw_key)
+            raw_items.append(item)
+            added += 1
+
+        logger.info(
+            'HH responses debug: vacancy_id=%s variant=%s fetched=%s added=%s pages_loaded=%s raw_total=%s',
+            vacancy_id,
+            variant_name,
+            len(variant_items),
+            added,
+            variant_pages_loaded,
+            variant_raw_total,
+        )
+
+        if raw_items:
+            break
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
