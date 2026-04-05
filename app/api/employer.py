@@ -385,7 +385,6 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         normalized_item = _normalize_response(item)
         score, score_breakdown = _score_candidate_against_vacancy(
             vacancy_criteria=vacancy_criteria,
-            vacancy_payload=vacancy_payload if isinstance(vacancy_payload, dict) else {},
             response_item=item,
         )
         normalized_item['score'] = score
@@ -1389,17 +1388,21 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
     )
 
     salary = vacancy_payload.get('salary') if isinstance(vacancy_payload.get('salary'), dict) else {}
-    add_criterion(
-        criterion_id='salary',
-        expected={
-            'from': salary.get('from') if isinstance(salary.get('from'), (int, float)) else None,
-            'to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else None,
-            'currency': salary.get('currency') if isinstance(salary.get('currency'), str) else None,
-        },
-        compare_mode='salary_range',
-        importance='required',
-        label='Зарплата',
-    )
+    salary_from = salary.get('from') if isinstance(salary.get('from'), (int, float)) else None
+    salary_to = salary.get('to') if isinstance(salary.get('to'), (int, float)) else None
+    salary_expected = {
+        'from': salary_from,
+        'to': salary_to,
+        'currency': salary.get('currency') if isinstance(salary.get('currency'), str) else None,
+    }
+    if salary_from is not None or salary_to is not None:
+        add_criterion(
+            criterion_id='salary',
+            expected=salary_expected,
+            compare_mode='salary_range',
+            importance='required',
+            label='Зарплата',
+        )
 
     add_criterion(
         criterion_id='experience',
@@ -1481,56 +1484,12 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
             label='Дополнительные требования',
         )
 
-    # Динамический проход по другим заполненным полям вакансии, которые можно сопоставить.
-    ignored_keys = {
-        'id',
-        'name',
-        'url',
-        'alternate_url',
-        'description',
-        'created_at',
-        'published_at',
-        'archived_at',
-        'response_url',
-        'contacts',
-        'branding',
-        'address',
-        'insider_interview',
-        'salary',
-        'requirements',
-        'key_skills',
-        'languages',
-        'area',
-        'experience',
-        'employment',
-        'schedule',
-        'working_days',
-        'work_schedule_by_days',
-    }
-    for key, value in vacancy_payload.items():
-        if key in ignored_keys:
-            continue
-        if key in criteria:
-            continue
-        expected_tokens = _to_comparable_tokens(value)
-        if not expected_tokens:
-            continue
-        inferred_importance = 'required' if any(token in key for token in ('must', 'required', 'mandatory')) else 'preferred'
-        add_criterion(
-            criterion_id=f'vacancy_{key}',
-            expected=expected_tokens,
-            compare_mode='candidate_text_overlap',
-            importance=inferred_importance,
-            label=f'Поле вакансии: {key}',
-        )
-
     return criteria
 
 
 def _score_candidate_against_vacancy(
     *,
     vacancy_criteria: dict[str, dict[str, object]],
-    vacancy_payload: dict,
     response_item: dict,
 ) -> tuple[int | None, list[dict[str, object]]]:
     if not vacancy_criteria:
@@ -1571,7 +1530,6 @@ def _score_candidate_against_vacancy(
             compare_mode=compare_mode,
             expected=expected,
             candidate_profile=candidate_profile,
-            vacancy_payload=vacancy_payload,
         )
         points = round(weight * match_ratio, 2)
         total_weight += weight
@@ -1644,7 +1602,6 @@ def _match_criterion(
     compare_mode: str,
     expected: object,
     candidate_profile: dict[str, object],
-    vacancy_payload: dict,
 ) -> tuple[float, str]:
     if compare_mode == 'token_overlap':
         expected_tokens = _normalize_tokens(_as_string_list(expected))
@@ -1654,7 +1611,10 @@ def _match_criterion(
         if not candidate_tokens:
             return 0.0, 'Нет данных кандидата для сравнения.'
         overlap = len(expected_tokens & candidate_tokens)
-        ratio = overlap / max(len(expected_tokens), 1)
+        if criterion == 'location':
+            ratio = 1.0 if overlap > 0 else 0.0
+        else:
+            ratio = overlap / max(len(expected_tokens), 1)
         return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
 
     if compare_mode == 'salary_range' and isinstance(expected, dict):
@@ -1681,17 +1641,6 @@ def _match_criterion(
         if not expected:
             return 0.0, 'Требования не указаны.'
         return matched / len(expected), f'Совпало {matched} из {len(expected)} текстовых требований.'
-
-    if compare_mode == 'candidate_text_overlap':
-        expected_tokens = _normalize_tokens(_as_string_list(expected))
-        candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get('all_tokens')))
-        if not expected_tokens:
-            return 0.0, 'Поле вакансии не заполнено.'
-        if not candidate_tokens:
-            return 0.0, 'Недостаточно данных кандидата.'
-        overlap = len(expected_tokens & candidate_tokens)
-        ratio = overlap / max(len(expected_tokens), 1)
-        return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
 
     return 0.0, 'Нет логики сравнения для критерия.'
 
@@ -1721,25 +1670,6 @@ def _extract_single_name(value: object) -> list[str]:
     return []
 
 
-def _to_comparable_tokens(value: object) -> list[str]:
-    if isinstance(value, str):
-        normalized = _normalize_text(value)
-        return [normalized] if normalized else []
-    if isinstance(value, (int, float, bool)):
-        return [str(value)]
-    if isinstance(value, dict):
-        result: list[str] = []
-        for nested_value in value.values():
-            result.extend(_to_comparable_tokens(nested_value))
-        return result
-    if isinstance(value, list):
-        result: list[str] = []
-        for nested_value in value:
-            result.extend(_to_comparable_tokens(nested_value))
-        return result
-    return []
-
-
 def _has_meaningful_value(value: object) -> bool:
     if value is None:
         return False
@@ -1762,6 +1692,12 @@ def _as_string_list(value: object) -> list[str]:
         for item in value:
             if isinstance(item, str):
                 result.append(item)
+        return result
+    if isinstance(value, dict):
+        result: list[str] = []
+        for nested_value in value.values():
+            if isinstance(nested_value, str):
+                result.append(nested_value)
         return result
     return []
 

@@ -95,12 +95,35 @@ function formatScoreValue(score?: number | null): string {
   return typeof score === 'number' ? `Score: ${score}` : 'Score: —';
 }
 
-function getScoreColorClass(score?: number | null): string {
+function buildScoreColorMap(responses: VacancyResponse[]): Map<number, string> {
+  const sortedUniqueScores = Array.from(
+    new Set(
+      responses
+        .map((response) => response.score)
+        .filter((score): score is number => typeof score === 'number')
+        .sort((left, right) => right - left)
+    )
+  );
+
+  const colorSteps = ['score-chip-high', 'score-chip-mid-high', 'score-chip-mid', 'score-chip-low'];
+  const map = new Map<number, string>();
+
+  if (sortedUniqueScores.length === 0) {
+    return map;
+  }
+
+  sortedUniqueScores.forEach((score, index) => {
+    const percentilePosition = sortedUniqueScores.length === 1 ? 0 : index / (sortedUniqueScores.length - 1);
+    const colorIndex = Math.min(Math.floor(percentilePosition * colorSteps.length), colorSteps.length - 1);
+    map.set(score, colorSteps[colorIndex]);
+  });
+
+  return map;
+}
+
+function getScoreColorClass(score: number | null | undefined, scoreColorMap: Map<number, string>): string {
   if (typeof score !== 'number') return 'score-chip-neutral';
-  if (score >= 80) return 'score-chip-high';
-  if (score >= 60) return 'score-chip-mid-high';
-  if (score >= 40) return 'score-chip-mid';
-  return 'score-chip-low';
+  return scoreColorMap.get(score) ?? 'score-chip-neutral';
 }
 
 export function VacancyDetailsPage() {
@@ -205,6 +228,8 @@ export function VacancyDetailsPage() {
       return rightDate - leftDate;
     });
   }, [responses, sortMode]);
+
+  const scoreColorMap = useMemo(() => buildScoreColorMap(visibleResponses), [visibleResponses]);
 
   if (loading) {
     return (
@@ -323,7 +348,7 @@ export function VacancyDetailsPage() {
                         <strong>#{displayIndex}</strong>
                         <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
                       </div>
-                      <span className={`score-chip ${getScoreColorClass(response.score)}`}>{formatScoreValue(response.score)}</span>
+                      <span className={`score-chip ${getScoreColorClass(response.score, scoreColorMap)}`}>{formatScoreValue(response.score)}</span>
                     </div>
                     <div className="response-row">
                       {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
