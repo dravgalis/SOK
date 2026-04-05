@@ -185,6 +185,27 @@ export function VacancyDetailsPage() {
     return vacancy.status || '—';
   }, [vacancy]);
 
+  const visibleResponses = useMemo(() => {
+    const filtered = responses.filter(hasVisibleCandidateFields);
+    return [...filtered].sort((left, right) => {
+      if (sortMode === 'response_date') {
+        const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
+        const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
+        return rightDate - leftDate;
+      }
+
+      const leftScore = typeof left.score === 'number' ? left.score : -1;
+      const rightScore = typeof right.score === 'number' ? right.score : -1;
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
+      }
+
+      const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
+      const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
+      return rightDate - leftDate;
+    });
+  }, [responses, sortMode]);
+
   if (loading) {
     return (
       <main className="page page-top">
@@ -223,27 +244,6 @@ export function VacancyDetailsPage() {
       </main>
     );
   }
-
-  const visibleResponses = useMemo(() => {
-    const filtered = responses.filter(hasVisibleCandidateFields);
-    return [...filtered].sort((left, right) => {
-      if (sortMode === 'response_date') {
-        const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
-        const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
-        return rightDate - leftDate;
-      }
-
-      const leftScore = typeof left.score === 'number' ? left.score : -1;
-      const rightScore = typeof right.score === 'number' ? right.score : -1;
-      if (rightScore !== leftScore) {
-        return rightScore - leftScore;
-      }
-
-      const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
-      const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
-      return rightDate - leftDate;
-    });
-  }, [responses, sortMode]);
 
   return (
     <main className="page page-top">
