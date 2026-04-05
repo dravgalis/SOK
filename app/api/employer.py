@@ -787,7 +787,7 @@ async def _fetch_negotiations_by_params(
     params: dict[str, str],
     expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
-    per_page = 50
+    per_page = 200
     items: list[dict] = []
     raw_total: int | None = None
     page_counts: list[dict[str, int]] = []
@@ -972,7 +972,7 @@ async def _fetch_single_collection_path(
     collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
     collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
 
-    per_page = 50
+    per_page = 200
     base_path = path.split('?', 1)[0]
     base_params = {
         **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
