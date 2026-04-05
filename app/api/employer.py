@@ -181,11 +181,16 @@ async def get_vacancy_responses(
         'items': paginated_items,
         'total': total,
         'count': total,
+        'loaded_count': responses_payload.get('loaded_count', total),
+        'hh_total': responses_payload.get('hh_total', 0),
+        'has_gap': responses_payload.get('has_gap', False),
+        'gap_reason': responses_payload.get('gap_reason'),
         'page': resolved_page,
         'per_page': effective_per_page,
         'pages': pages,
         'summary_total_raw': responses_payload.get('summary_total_raw', 0),
         'state_alias_groups': responses_payload.get('state_alias_groups', []),
+        'debug': responses_payload.get('debug', {}),
         'full_export': all,
     }
 
@@ -321,41 +326,95 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
+    vacancy_payload = await _hh_get(client, f'/vacancies/{vacancy_id}', access_token=access_token, allow_404=True)
+    hh_total_from_vacancy = _extract_responses_count(vacancy_payload) if vacancy_payload.get('_status_code') != 404 else 0
+
+    seed_payload = await _hh_get(
+        client,
+        '/negotiations',
+        access_token=access_token,
+        params={
+            'vacancy_id': vacancy_id,
+            'status': 'any',
+            'page': '0',
+            'per_page': '1',
+            'all': 'true',
+        },
+        allow_404=True,
+    )
+    if seed_payload.get('_status_code') == 404:
+        seed_payload = {}
+
+    discovered_states_raw, discovered_states_normalized, state_names = await _discover_response_states(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        seed_payload=seed_payload,
+    )
+
+    states_processed_raw: list[str] = []
+    states_processed_normalized: list[str] = []
     raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
-    fetch_variants: list[tuple[str, dict[str, str]]] = [
-        ('status_any', {'status': 'any'}),
-        ('no_status', {}),
-    ]
+    duplicates_skipped = 0
 
-    for variant_name, variant_params in fetch_variants:
+    for state in discovered_states_normalized:
+        params = {'status': state} if state else {}
         variant_items, variant_pages_loaded, variant_raw_total, _, _ = await _fetch_negotiations_by_params(
             client,
             access_token=access_token,
             vacancy_id=vacancy_id,
-            params=variant_params,
+            params=params,
         )
+        matching_raw_states = [raw for raw in discovered_states_raw if _normalize_state_alias(raw) == state]
+        state_raw = matching_raw_states[0] if matching_raw_states else state
+        states_processed_raw.append(state_raw or 'no_status')
+        states_processed_normalized.append(state or 'no_status')
+
         added = 0
         for item in variant_items:
             raw_key = _extract_response_dedupe_key(item)
             if raw_key in seen_raw_keys:
+                duplicates_skipped += 1
                 continue
             seen_raw_keys.add(raw_key)
             raw_items.append(item)
             added += 1
 
         logger.info(
-            'HH responses debug: vacancy_id=%s variant=%s fetched=%s added=%s pages_loaded=%s raw_total=%s',
+            'HH responses debug: vacancy_id=%s state=%s fetched=%s added=%s pages_loaded=%s raw_total=%s',
             vacancy_id,
-            variant_name,
+            state,
             len(variant_items),
             added,
             variant_pages_loaded,
             variant_raw_total,
         )
 
-        if raw_items:
-            break
+    if 'any' not in discovered_states_normalized:
+        fallback_items, variant_pages_loaded, variant_raw_total, _, _ = await _fetch_negotiations_by_params(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            params={'status': 'any'},
+        )
+        states_processed_raw.append('any')
+        states_processed_normalized.append('any')
+        for item in fallback_items:
+            raw_key = _extract_response_dedupe_key(item)
+            if raw_key in seen_raw_keys:
+                duplicates_skipped += 1
+                continue
+            seen_raw_keys.add(raw_key)
+            raw_items.append(item)
+        logger.info(
+            'HH responses debug: vacancy_id=%s state=%s fetched=%s pages_loaded=%s raw_total=%s',
+            vacancy_id,
+            'any',
+            len(fallback_items),
+            variant_pages_loaded,
+            variant_raw_total,
+        )
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -384,10 +443,41 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         list(seen_response_ids)[:10],
     )
 
+    summary_by_state = _extract_summary_by_state(seed_payload, state_names=state_names)
+    summary_counts_map, _ = _aggregate_summary_by_state(summary_by_state)
+    summary_total = sum(summary_counts_map.values())
+    hh_total_raw = _extract_hh_total_raw(seed_payload)
+    hh_total = hh_total_from_vacancy if hh_total_from_vacancy > 0 else (summary_total if summary_total > 0 else hh_total_raw)
+    loaded_count = len(unique_items)
+    has_gap = hh_total > 0 and loaded_count < hh_total
+    collection_failure = hh_total > 0 and loaded_count == 0
+    visibility_gap = has_gap and not collection_failure
+
     return {
         'items': unique_items,
-        'summary_total_raw': 0,
+        'loaded_count': loaded_count,
+        'hh_total': hh_total,
+        'has_gap': has_gap,
+        'gap_reason': (
+            'HH API returns fewer detailed negotiations than vacancy counter (permissions / hidden / archived)'
+            if has_gap
+            else None
+        ),
+        'summary_total_raw': summary_total,
         'state_alias_groups': [],
+        'debug': {
+            'states_processed': states_processed_normalized,
+            'states_processed_raw': states_processed_raw,
+            'states_processed_normalized': states_processed_normalized,
+            'discovered_states_raw': discovered_states_raw,
+            'discovered_states_normalized': discovered_states_normalized,
+            'duplicates_skipped': duplicates_skipped + duplicate_items,
+            'missing_items': max(hh_total - loaded_count, 0),
+            'summary_total': summary_total,
+            'hh_total_raw': hh_total_raw,
+            'visibility_gap': visibility_gap,
+            'collection_failure': collection_failure,
+        },
     }
 
 
@@ -569,12 +659,18 @@ async def _discover_response_states(
     access_token: str,
     vacancy_id: str,
     seed_payload: dict,
-) -> tuple[list[str], dict[str, str]]:
-    states: list[str] = ['any']
+) -> tuple[list[str], list[str], dict[str, str]]:
+    raw_states: list[str] = ['any']
+    normalized_states: list[str] = ['any']
     state_names = _extract_state_names_from_collections(seed_payload)
     for state in _extract_states_from_collections(seed_payload):
-        if state not in states:
-            states.append(state)
+        if state not in raw_states:
+            raw_states.append(state)
+        normalized_state = _normalize_state_alias(state)
+        if normalized_state and normalized_state not in normalized_states:
+            normalized_states.append(normalized_state)
+            if state in state_names and normalized_state not in state_names:
+                state_names[normalized_state] = state_names[state]
 
     for path in ('/negotiations/response_statuses', '/negotiations/statuses'):
         payload = await _hh_get(
@@ -588,12 +684,17 @@ async def _discover_response_states(
             continue
 
         for state_id, state_name in _extract_states_from_payload(payload):
-            if state_id not in states:
-                states.append(state_id)
+            if state_id not in raw_states:
+                raw_states.append(state_id)
+            normalized_state = _normalize_state_alias(state_id)
+            if normalized_state and normalized_state not in normalized_states:
+                normalized_states.append(normalized_state)
             if state_name:
                 state_names[state_id] = state_name
+                if normalized_state and normalized_state not in state_names:
+                    state_names[normalized_state] = state_name
 
-    return states, state_names
+    return raw_states, normalized_states, state_names
 
 
 def _extract_states_from_payload(payload: dict) -> list[tuple[str, str | None]]:
@@ -713,11 +814,16 @@ async def _fetch_negotiations_by_params(
     raw_ids: list[str] = []
 
     while True:
+        normalized_params = dict(params)
+        status = normalized_params.get('status')
+        if isinstance(status, str) and status:
+            normalized_params['status'] = _normalize_state_alias(status)
         request_params = {
             'vacancy_id': vacancy_id,
-            **params,
+            **normalized_params,
             'page': str(page),
             'per_page': str(per_page),
+            'all': 'true',
         }
         payload = await _hh_get(
             client,
