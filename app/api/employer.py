@@ -1433,7 +1433,7 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
         )
     add_criterion(
         criterion_id='work_format',
-        expected=_extract_single_name(vacancy_payload.get('schedule')),
+        expected=_extract_names_from_list(vacancy_payload.get('work_format') if isinstance(vacancy_payload.get('work_format'), list) else []),
         compare_mode='token_overlap',
         importance='preferred',
         label='Формат работы',
@@ -1444,14 +1444,6 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
         compare_mode='token_overlap',
         importance='required',
         label='Тип занятости',
-    )
-    add_criterion(
-        criterion_id='schedule',
-        expected=_extract_single_name(vacancy_payload.get('work_schedule_by_days'))
-        or _extract_names_from_list(vacancy_payload.get('working_days') if isinstance(vacancy_payload.get('working_days'), list) else []),
-        compare_mode='token_overlap',
-        importance='preferred',
-        label='График',
     )
     add_criterion(
         criterion_id='language',
@@ -1524,7 +1516,6 @@ def _score_candidate_against_vacancy(
         'experience': 16,
         'work_format': 10,
         'employment_type': 12,
-        'schedule': 10,
         'language': 10,
         'formalization': 8,
         'remote_mode': 8,
@@ -1597,6 +1588,9 @@ def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None
     schedule_names = _extract_names_from_list(resume_source.get('schedules') if isinstance(resume_source.get('schedules'), list) else [])
     employment_names = _extract_names_from_list(resume_source.get('employments') if isinstance(resume_source.get('employments'), list) else [])
     language_names = _extract_names_from_list(languages)
+    work_format_names = _extract_names_from_list(
+        resume_source.get('work_format') if isinstance(resume_source.get('work_format'), list) else []
+    )
     specialization_names = _extract_names_from_list(
         resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), list) else []
     )
@@ -1630,9 +1624,8 @@ def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None
         'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
         'experience': [value for value in (resume.get('total_experience'), resume.get('experience')) if isinstance(value, str) and value.strip()],
         'total_experience_months': parsed_experience_months,
-        'work_format': schedule_names,
+        'work_format': work_format_names,
         'employment_type': employment_names,
-        'schedule': schedule_names,
         'language': language_names,
         'formalization': employment_names,
         'remote_mode': schedule_names,
@@ -1660,12 +1653,19 @@ def _match_criterion(
             ratio = 1.0 if overlap > 0 else 0.0
         elif criterion == 'specialization':
             ratio = 1.0 if overlap > 0 else 0.0
+        elif criterion == 'work_format':
+            ratio = 1.0 if overlap > 0 else 0.0
         else:
             ratio = overlap / max(len(expected_tokens), 1)
         if criterion in {'skills', 'specialization'} and overlap > 0:
             matched_values = sorted(expected_tokens & candidate_tokens)
             label = 'Совпали навыки' if criterion == 'skills' else 'Совпала специализация'
             return ratio, f'{label}: {", ".join(matched_values)}'
+        if criterion == 'work_format':
+            if overlap > 0:
+                matched_values = sorted(expected_tokens & candidate_tokens)
+                return 1.0, f'Совпало: {", ".join(matched_values)}'
+            return 0.0, 'Не совпадает формат работы'
         return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
 
     if compare_mode == 'salary_range' and isinstance(expected, dict):
