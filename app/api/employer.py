@@ -1368,6 +1368,13 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
         importance='required',
         label='Навыки',
     )
+    add_criterion(
+        criterion_id='specialization',
+        expected=_extract_names_from_list(vacancy_payload.get('professional_roles') if isinstance(vacancy_payload.get('professional_roles'), list) else []),
+        compare_mode='token_overlap',
+        importance='required',
+        label='Специализация',
+    )
 
     area = vacancy_payload.get('area') if isinstance(vacancy_payload.get('area'), dict) else {}
     location_expected = [
@@ -1404,13 +1411,21 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
             label='Зарплата',
         )
 
-    add_criterion(
-        criterion_id='experience',
-        expected=_extract_single_name(vacancy_payload.get('experience')),
-        compare_mode='token_overlap',
-        importance='required',
-        label='Опыт',
-    )
+    experience_values = _extract_single_name(vacancy_payload.get('experience'))
+    if experience_values:
+        experience_label = experience_values[0]
+        min_months, max_months = _parse_experience_range_months(experience_label)
+        add_criterion(
+            criterion_id='experience',
+            expected={
+                'label': experience_label,
+                'min_months': min_months,
+                'max_months': max_months,
+            },
+            compare_mode='experience_range',
+            importance='required',
+            label='Опыт',
+        )
     add_criterion(
         criterion_id='work_format',
         expected=_extract_single_name(vacancy_payload.get('schedule')),
@@ -1497,6 +1512,7 @@ def _score_candidate_against_vacancy(
 
     criterion_weights = {
         'skills': 18,
+        'specialization': 18,
         'location': 10,
         'salary': 14,
         'experience': 16,
@@ -1565,10 +1581,18 @@ def _extract_candidate_profile(item: dict) -> dict[str, object]:
     schedule_names = _extract_names_from_list(resume.get('schedules') if isinstance(resume.get('schedules'), list) else [])
     employment_names = _extract_names_from_list(resume.get('employments') if isinstance(resume.get('employments'), list) else [])
     language_names = _extract_names_from_list(languages)
+    specialization_names = _extract_names_from_list(resume.get('professional_roles') if isinstance(resume.get('professional_roles'), list) else [])
+    resume_title = resume.get('title') if isinstance(resume.get('title'), str) else None
+    parsed_experience_months = _extract_candidate_experience_months(resume, item)
+    skill_candidates = _extract_names_from_list(resume.get('skill_set') if isinstance(resume.get('skill_set'), list) else [])
+    if resume_title and resume_title.strip():
+        skill_candidates.append(resume_title.strip())
+    skill_candidates.extend(specialization_names)
+
     text_blob = ' '.join(
         value
         for value in (
-            resume.get('title'),
+            resume_title,
             resume.get('skills'),
             resume.get('skill_set') if isinstance(resume.get('skill_set'), str) else None,
             resume.get('professional_roles') if isinstance(resume.get('professional_roles'), str) else None,
@@ -1580,11 +1604,13 @@ def _extract_candidate_profile(item: dict) -> dict[str, object]:
     normalized_blob = _normalize_text(text_blob)
 
     return {
-        'skills': _extract_names_from_list(resume.get('skill_set') if isinstance(resume.get('skill_set'), list) else []),
+        'skills': skill_candidates,
+        'specialization': specialization_names or ([resume_title] if resume_title else []),
         'location': [area.get('name')] if isinstance(area.get('name'), str) and area.get('name').strip() else [],
         'salary_from': salary.get('from') if isinstance(salary.get('from'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
         'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
         'experience': [value for value in (resume.get('total_experience'), resume.get('experience')) if isinstance(value, str) and value.strip()],
+        'total_experience_months': parsed_experience_months,
         'work_format': schedule_names,
         'employment_type': employment_names,
         'schedule': schedule_names,
@@ -1628,6 +1654,34 @@ def _match_criterion(
         if isinstance(expected_from, (int, float)) and candidate_from < expected_from:
             return 0.7, 'Ожидания ниже минимальной границы.'
         return 1.0, 'Зарплатные ожидания попадают в вилку.'
+
+    if compare_mode == 'experience_range' and isinstance(expected, dict):
+        candidate_months = candidate_profile.get('total_experience_months')
+        if not isinstance(candidate_months, int):
+            return 0.0, 'Не удалось определить суммарный опыт кандидата.'
+
+        min_months = expected.get('min_months')
+        max_months = expected.get('max_months')
+        experience_label = expected.get('label') if isinstance(expected.get('label'), str) else '—'
+
+        if isinstance(min_months, int) and candidate_months < min_months:
+            return 0.0, f'Опыт кандидата {candidate_months} мес., требуется от {min_months} мес. ({experience_label}).'
+        if isinstance(max_months, int) and candidate_months > max_months:
+            return 0.7, f'Опыт кандидата {candidate_months} мес., выше диапазона до {max_months} мес. ({experience_label}).'
+        if isinstance(min_months, int) or isinstance(max_months, int):
+            if isinstance(min_months, int) and isinstance(max_months, int):
+                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует {min_months}–{max_months} мес.'
+            if isinstance(min_months, int):
+                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует от {min_months} мес.'
+            return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует до {max_months} мес.'
+
+        candidate_text_tokens = _normalize_tokens(_as_string_list(candidate_profile.get('experience')))
+        expected_tokens = _normalize_tokens([experience_label])
+        if not candidate_text_tokens:
+            return 0.0, 'Нет данных кандидата для сравнения по опыту.'
+        overlap = len(expected_tokens & candidate_text_tokens)
+        ratio = overlap / max(len(expected_tokens), 1)
+        return ratio, f'Сопоставление текстового опыта: {overlap} из {len(expected_tokens)}.'
 
     if compare_mode == 'text_presence' and isinstance(expected, dict):
         summary_text = candidate_profile.get('summary_text') if isinstance(candidate_profile.get('summary_text'), str) else ''
@@ -1705,8 +1759,78 @@ def _as_string_list(value: object) -> list[str]:
 def _normalize_text(value: str) -> str:
     decoded = unescape(value)
     no_tags = re.sub(r'<[^>]+>', ' ', decoded)
-    normalized = re.sub(r'\s+', ' ', no_tags).strip().lower()
+    normalized = no_tags.lower().replace('-', ' ').replace('—', ' ').replace('/', ' ')
+    normalized = re.sub(r'[^a-zа-яё0-9+\s]', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
     return normalized
+
+
+def _extract_candidate_experience_months(resume: dict, item: dict) -> int | None:
+    total_experience = resume.get('total_experience')
+    if isinstance(total_experience, dict):
+        months_value = total_experience.get('months')
+        if isinstance(months_value, int):
+            return max(months_value, 0)
+
+    for source in (
+        total_experience if isinstance(total_experience, str) else None,
+        resume.get('experience') if isinstance(resume.get('experience'), str) else None,
+        item.get('experience') if isinstance(item.get('experience'), str) else None,
+    ):
+        if isinstance(source, str):
+            parsed = _parse_experience_months_from_text(source)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _parse_experience_months_from_text(value: str) -> int | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+
+    years_match = re.search(r'(\d+)\s*(год|года|лет)', normalized)
+    months_match = re.search(r'(\d+)\s*(месяц|месяца|месяцев|мес)', normalized)
+    years = int(years_match.group(1)) if years_match else 0
+    months = int(months_match.group(1)) if months_match else 0
+    total = years * 12 + months
+    if total > 0:
+        return total
+
+    plain_number_match = re.search(r'(\d+)', normalized)
+    if plain_number_match:
+        return int(plain_number_match.group(1)) * 12
+    return None
+
+
+def _parse_experience_range_months(label: str) -> tuple[int | None, int | None]:
+    normalized = _normalize_text(label)
+    if not normalized:
+        return None, None
+
+    numbers = [int(match) for match in re.findall(r'\d+', normalized)]
+    if '+' in normalized and numbers:
+        return numbers[0] * 12, None
+    if len(numbers) >= 2:
+        first, second = numbers[0], numbers[1]
+        return min(first, second) * 12, max(first, second) * 12
+    if len(numbers) == 1:
+        value = numbers[0] * 12
+        if 'до' in normalized:
+            return None, value
+        return value, None
+
+    mapping = {
+        'нет опыта': (0, 12),
+        'от 1 года до 3 лет': (12, 36),
+        'от 3 до 6 лет': (36, 72),
+        'более 6 лет': (72, None),
+    }
+    for key, range_value in mapping.items():
+        if key in normalized:
+            return range_value
+
+    return None, None
 
 
 def _normalize_tokens(values: list[str]) -> set[str]:
