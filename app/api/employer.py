@@ -356,6 +356,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'items': [],
             'summary_by_state': [],
             'summary_total': 0,
+            'summary_total_raw': 0,
+            'state_alias_groups': [],
             'fetched_by_state': [],
             'missing_by_state': [],
             'missing_items_count': 0,
@@ -375,6 +377,9 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'any_status_total_raw': 0,
             'vacancy_vs_any_gap': max(total_from_vacancy, 0),
             'visibility_gap_note': None,
+            'can_fetch_all_detailed_items': True,
+            'api_limitation_states': [],
+            'fallback_fetches': [],
         }
 
     raw_items, pages_loaded, hh_total_raw, page_counts, _ = await _fetch_negotiations_by_params(
@@ -465,8 +470,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         raw_items.extend(fallback_items)
         fallback_fetches = fallback_info
 
-    items_before_filtering = len(raw_items)
-    source_items = [item for item in raw_items if _is_real_response_item(item)]
+    items_before_filtering = len(deduped_items)
+    source_items = [item for item in deduped_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
 
     fetched_counts_map = _count_items_by_state(source_items)
