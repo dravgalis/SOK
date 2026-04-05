@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import urlparse
 
 import httpx
@@ -10,6 +11,7 @@ router = APIRouter()
 
 HH_API_BASE = 'https://api.hh.ru'
 logger = logging.getLogger(__name__)
+STATE_ALIAS_RE = re.compile(r'^(?P<base>[a-z_]+)_\d+$')
 
 
 @router.get('/me')
@@ -171,6 +173,8 @@ async def get_vacancy_responses(
         'items': paginated_items,
         'summary_by_state': responses_payload['summary_by_state'],
         'summary_total': responses_payload['summary_total'],
+        'summary_total_raw': responses_payload['summary_total_raw'],
+        'state_alias_groups': responses_payload['state_alias_groups'],
         'fetched_by_state': responses_payload['fetched_by_state'],
         'missing_by_state': responses_payload['missing_by_state'],
         'missing_items_count': responses_payload['missing_items_count'],
@@ -195,6 +199,9 @@ async def get_vacancy_responses(
         'any_status_total_raw': responses_payload['any_status_total_raw'],
         'vacancy_vs_any_gap': responses_payload['vacancy_vs_any_gap'],
         'visibility_gap_note': responses_payload['visibility_gap_note'],
+        'can_fetch_all_detailed_items': responses_payload['can_fetch_all_detailed_items'],
+        'api_limitation_states': responses_payload['api_limitation_states'],
+        'fallback_fetches': responses_payload['fallback_fetches'],
         'full_export': all,
     }
 
@@ -349,6 +356,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'items': [],
             'summary_by_state': [],
             'summary_total': 0,
+            'summary_total_raw': 0,
+            'state_alias_groups': [],
             'fetched_by_state': [],
             'missing_by_state': [],
             'missing_items_count': 0,
@@ -368,142 +377,84 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'any_status_total_raw': 0,
             'vacancy_vs_any_gap': max(total_from_vacancy, 0),
             'visibility_gap_note': None,
+            'can_fetch_all_detailed_items': True,
+            'api_limitation_states': [],
+            'fallback_fetches': [],
         }
 
-    states_processed, state_names = await _discover_response_states(
+    raw_items, pages_loaded, hh_total_raw, page_counts, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
-        seed_payload=payload,
+        params={'status': 'any'},
+        expected_count_hint=total_from_vacancy,
     )
-    summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
 
-    pages_loaded = 0
-    hh_total_raw = _extract_hh_total_raw(payload)
-    any_status_total_raw = hh_total_raw
-    raw_items: list[dict] = []
+    deduped_items: list[dict] = []
     dedupe_keys: set[str] = set()
-    state_fetch_diagnostics: list[dict[str, object]] = []
     duplicates_skipped_total = 0
-
-    for state in states_processed:
-        state_items, state_pages, state_total = await _fetch_negotiations_pages(
-            client,
-            access_token=access_token,
-            vacancy_id=vacancy_id,
-            state=state,
-        )
-        pages_loaded += state_pages
-        if isinstance(state_total, int):
-            hh_total_raw = max(hh_total_raw, state_total)
-
-        state_added = 0
-        state_duplicates = 0
-        for item in state_items:
-            dedupe_key = _extract_response_dedupe_key(item)
-            if dedupe_key in dedupe_keys:
-                state_duplicates += 1
-                continue
-            dedupe_keys.add(dedupe_key)
-            raw_items.append(item)
-            state_added += 1
-
-        duplicates_skipped_total += state_duplicates
-        state_fetch_diagnostics.append(
-            {
-                'state': state,
-                'pages_loaded': state_pages,
-                'fetched_raw_count': len(state_items),
-                'added_after_dedupe': state_added,
-                'duplicates_skipped': state_duplicates,
-                'state_total_raw': state_total,
-            }
-        )
-
-    followup_items, followup_debug = await _fetch_followup_negotiations_from_collections(
-        client,
-        access_token=access_token,
-        vacancy_id=vacancy_id,
-        payload=payload,
-    )
-    for item in followup_items:
+    for item in raw_items:
         dedupe_key = _extract_response_dedupe_key(item)
         if dedupe_key in dedupe_keys:
             duplicates_skipped_total += 1
             continue
         dedupe_keys.add(dedupe_key)
-        raw_items.append(item)
+        deduped_items.append(item)
 
-    items_before_filtering = len(raw_items)
-    source_items = [item for item in raw_items if _is_real_response_item(item)]
+    items_before_filtering = len(deduped_items)
+    source_items = [item for item in deduped_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
-
-    fetched_counts_map = _count_items_by_state(source_items)
-    summary_counts_map, summary_names_map = _aggregate_summary_by_state(summary_by_state)
-    summary_total = sum(summary_counts_map.values())
-
-    state_diagnostics = _build_state_diagnostics(
-        summary_counts_map=summary_counts_map,
-        fetched_counts_map=fetched_counts_map,
-        summary_names_map=summary_names_map,
-        state_names=state_names,
-    )
-    missing_by_state = [row for row in state_diagnostics if row.get('missing_count', 0) > 0]
-    fetched_by_state = [
-        {
-            'state': state,
-            'state_name': summary_names_map.get(state) or state_names.get(state) or state,
-            'count': count,
-        }
-        for state, count in sorted(fetched_counts_map.items(), key=lambda item: item[0])
-    ]
-    collection_diagnostics = _enrich_collection_diagnostics(
-        raw_collection_diagnostics=followup_debug['collection_diagnostics'],
-        summary_counts_map=summary_counts_map,
-        fetched_counts_map=fetched_counts_map,
-    )
-
     normalized_items = [_normalize_response(item) for item in source_items]
     total_count = len(normalized_items)
-    base_total_for_gap = summary_total if summary_total > 0 else total_from_vacancy
-    missing_items_count = max(base_total_for_gap - total_count, 0)
-    vacancy_vs_any_gap = max(total_from_vacancy - any_status_total_raw, 0)
-    visibility_restricted_states = [row for row in missing_by_state if row.get('missing_count', 0) > 0]
+    missing_items_count = max(total_from_vacancy - total_count, 0)
+
     visibility_gap_note = None
     if missing_items_count > 0:
         visibility_gap_note = (
-            'Summary/vacancy counters include responses that are not returned by detailed negotiations endpoints. '
-            'Likely reasons: permissions, archived/hidden negotiations, or HH API visibility rules. '
-            f'vacancy_total={total_from_vacancy}, any_status_total={any_status_total_raw}, '
-            f'detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}, '
-            f'missing_states={len(visibility_restricted_states)}.'
+            'HH negotiations status=any returned fewer detailed items than vacancy counter. '
+            f'vacancy_total={total_from_vacancy}, detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}.'
         )
 
     return {
         'items': normalized_items,
-        'summary_by_state': summary_by_state,
-        'summary_total': summary_total,
-        'fetched_by_state': fetched_by_state,
-        'missing_by_state': missing_by_state,
+        'summary_by_state': [],
+        'summary_total': 0,
+        'summary_total_raw': 0,
+        'state_alias_groups': [],
+        'fetched_by_state': [],
+        'missing_by_state': [],
         'missing_items_count': missing_items_count,
-        'state_diagnostics': state_diagnostics,
-        'state_fetch_diagnostics': state_fetch_diagnostics,
-        'collection_diagnostics': collection_diagnostics,
+        'state_diagnostics': [],
+        'state_fetch_diagnostics': [
+            {
+                'state': 'any',
+                'pages_loaded': pages_loaded,
+                'page_counts': page_counts,
+                'fetched_raw_count': len(raw_items),
+                'added_after_dedupe': len(deduped_items),
+                'duplicates_skipped': duplicates_skipped_total,
+                'state_total_raw': hh_total_raw,
+            }
+        ],
+        'collection_diagnostics': [],
         'count': total_count,
-        'detailed_items_count': len(normalized_items),
+        'detailed_items_count': total_count,
         'total_from_vacancy': total_from_vacancy,
-        'hh_total_raw': hh_total_raw,
+        'hh_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
         'pages_loaded': pages_loaded,
         'items_before_filtering': items_before_filtering,
         'items_after_filtering': items_after_filtering,
-        'states_processed': states_processed,
-        'summary_total_hint': summary_total,
-        'collections_urls_processed': followup_debug['urls_processed'],
-        'collections_pages_loaded': followup_debug['pages_loaded'],
-        'collections_errors': followup_debug['errors'],
-        'any_status_total_raw': any_status_total_raw,
-        'vacancy_vs_any_gap': vacancy_vs_any_gap,
+        'states_processed': ['any'],
+        'summary_total_hint': 0,
+        'collections_urls_processed': 0,
+        'collections_pages_loaded': 0,
+        'collections_errors': [],
+        'any_status_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
+        'vacancy_vs_any_gap': max(total_from_vacancy - (hh_total_raw if isinstance(hh_total_raw, int) else 0), 0),
         'visibility_gap_note': visibility_gap_note,
+        'can_fetch_all_detailed_items': missing_items_count == 0,
+        'api_limitation_states': [],
+        'fallback_fetches': [],
     }
 
 
@@ -511,7 +462,8 @@ def _count_items_by_state(items: list[dict]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in items:
         state = _extract_item_state_id(item)
-        counts[state] = counts.get(state, 0) + 1
+        logical_state = _normalize_state_alias(state)
+        counts[logical_state] = counts.get(logical_state, 0) + 1
     return counts
 
 
@@ -524,19 +476,34 @@ def _extract_item_state_id(item: dict) -> str:
     return fallback
 
 
-def _aggregate_summary_by_state(summary_by_state: list[dict[str, object]]) -> tuple[dict[str, int], dict[str, str]]:
+def _aggregate_summary_by_state(
+    summary_by_state: list[dict[str, object]],
+    *,
+    normalize_aliases: bool = True,
+) -> tuple[dict[str, int], dict[str, str]]:
     counts: dict[str, int] = {}
     names: dict[str, str] = {}
+    has_aliases: dict[str, bool] = {}
     for row in summary_by_state:
         state = row.get('state')
         if not isinstance(state, str) or not state:
             state = 'unknown'
+        logical_state = _normalize_state_alias(state) if normalize_aliases else state
         count = row.get('count')
         count_value = count if isinstance(count, int) else 0
-        counts[state] = counts.get(state, 0) + count_value
+        if normalize_aliases:
+            if logical_state not in counts:
+                counts[logical_state] = count_value
+            elif _is_state_alias(state) or has_aliases.get(logical_state, False):
+                counts[logical_state] = max(counts[logical_state], count_value)
+            else:
+                counts[logical_state] = counts[logical_state] + count_value
+            has_aliases[logical_state] = has_aliases.get(logical_state, False) or _is_state_alias(state)
+        else:
+            counts[logical_state] = counts.get(logical_state, 0) + count_value
         state_name = row.get('state_name')
         if isinstance(state_name, str) and state_name:
-            names[state] = state_name
+            names[logical_state] = state_name
     return counts, names
 
 
@@ -546,12 +513,41 @@ def _build_state_diagnostics(
     fetched_counts_map: dict[str, int],
     summary_names_map: dict[str, str],
     state_names: dict[str, str],
+    state_fetch_diagnostics: list[dict[str, object]],
 ) -> list[dict[str, object]]:
+    fetch_by_logical_state: dict[str, dict[str, object]] = {}
+    for row in state_fetch_diagnostics:
+        state = row.get('state')
+        if not isinstance(state, str) or not state:
+            continue
+        logical_state = _normalize_state_alias(state)
+        existing = fetch_by_logical_state.get(logical_state)
+        state_total_raw = row.get('state_total_raw')
+        state_total_raw_value = state_total_raw if isinstance(state_total_raw, int) else None
+        fetched_raw_count = row.get('fetched_raw_count')
+        fetched_raw_count_value = fetched_raw_count if isinstance(fetched_raw_count, int) else 0
+        if existing is None:
+            fetch_by_logical_state[logical_state] = {
+                'state_total_raw': state_total_raw_value,
+                'fetched_raw_count': fetched_raw_count_value,
+            }
+            continue
+        existing_total = existing.get('state_total_raw')
+        if isinstance(existing_total, int) and isinstance(state_total_raw_value, int):
+            existing['state_total_raw'] = max(existing_total, state_total_raw_value)
+        elif isinstance(state_total_raw_value, int):
+            existing['state_total_raw'] = state_total_raw_value
+        existing['fetched_raw_count'] = max(int(existing.get('fetched_raw_count', 0)), fetched_raw_count_value)
+
     diagnostics: list[dict[str, object]] = []
     all_states = sorted(set(summary_counts_map) | set(fetched_counts_map))
     for state in all_states:
         expected_count = summary_counts_map.get(state, 0)
         fetched_count = fetched_counts_map.get(state, 0)
+        state_fetch = fetch_by_logical_state.get(state, {})
+        hh_state_total_raw = state_fetch.get('state_total_raw')
+        fetched_raw_count = state_fetch.get('fetched_raw_count', 0)
+        api_limitation_suspected = isinstance(hh_state_total_raw, int) and hh_state_total_raw < expected_count
         diagnostics.append(
             {
                 'state': state,
@@ -559,6 +555,9 @@ def _build_state_diagnostics(
                 'expected_count': expected_count,
                 'fetched_count': fetched_count,
                 'missing_count': max(expected_count - fetched_count, 0),
+                'fetched_raw_count': fetched_raw_count,
+                'hh_state_total_raw': hh_state_total_raw if isinstance(hh_state_total_raw, int) else None,
+                'api_limitation_suspected': api_limitation_suspected,
             }
         )
     return diagnostics
@@ -575,11 +574,13 @@ def _enrich_collection_diagnostics(
         state = row.get('state')
         if not isinstance(state, str) or not state:
             state = 'unknown'
-        summary_count = summary_counts_map.get(state, 0)
-        fetched_detailed_count = fetched_counts_map.get(state, 0)
+        logical_state = _normalize_state_alias(state)
+        summary_count = summary_counts_map.get(logical_state, 0)
+        fetched_detailed_count = fetched_counts_map.get(logical_state, 0)
         enriched.append(
             {
                 **row,
+                'logical_state': logical_state,
                 'summary_count': summary_count,
                 'fetched_detailed_count': fetched_detailed_count,
                 'missing_count': max(summary_count - fetched_detailed_count, 0),
@@ -697,12 +698,86 @@ async def _fetch_negotiations_pages(
     access_token: str,
     vacancy_id: str,
     state: str,
-) -> tuple[list[dict], int, int | None]:
+    expected_count_hint: int | None = None,
+) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
+    return await _fetch_negotiations_by_params(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        params={'status': state},
+        expected_count_hint=expected_count_hint,
+    )
+
+
+async def _fetch_missing_negotiations_fallback(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    expected_total: int,
+    existing_items: list[dict],
+    existing_dedupe_keys: set[str],
+) -> tuple[list[dict], list[dict[str, object]]]:
+    fallback_variants: list[dict[str, str]] = [
+        {'status': 'any', 'archived': 'true'},
+        {'status': 'any', 'hidden': 'true'},
+        {'status': 'any', 'archived': 'true', 'hidden': 'true'},
+    ]
+    collected: list[dict] = []
+    diagnostics: list[dict[str, object]] = []
+
+    for params in fallback_variants:
+        items, pages_loaded, raw_total, page_counts, _ = await _fetch_negotiations_by_params(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            params=params,
+        )
+        added = 0
+        duplicates = 0
+        for item in items:
+            dedupe_key = _extract_response_dedupe_key(item)
+            if dedupe_key in existing_dedupe_keys:
+                duplicates += 1
+                continue
+            existing_dedupe_keys.add(dedupe_key)
+            existing_items.append(item)
+            collected.append(item)
+            added += 1
+        current_real_count = len([item for item in existing_items if _is_real_response_item(item)])
+        diagnostics.append(
+            {
+                'params': params,
+                'pages_loaded': pages_loaded,
+                'raw_total': raw_total,
+                'fetched_raw_count': len(items),
+                'added_after_dedupe': added,
+                'duplicates_skipped': duplicates,
+                'page_counts': page_counts,
+                'current_real_count': current_real_count,
+            }
+        )
+        if current_real_count >= expected_total:
+            break
+
+    return collected, diagnostics
+
+
+async def _fetch_negotiations_by_params(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    params: dict[str, str],
+    expected_count_hint: int | None = None,
+) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
     page = 0
     per_page = 50
     pages_loaded = 0
     items: list[dict] = []
     raw_total: int | None = None
+    page_counts: list[dict[str, int]] = []
+    raw_ids: list[str] = []
 
     while True:
         payload = await _hh_get(
@@ -711,7 +786,7 @@ async def _fetch_negotiations_pages(
             access_token=access_token,
             params={
                 'vacancy_id': vacancy_id,
-                'status': state,
+                **params,
                 'page': str(page),
                 'per_page': str(per_page),
             },
@@ -725,16 +800,30 @@ async def _fetch_negotiations_pages(
 
         page_items = payload.get('items')
         if isinstance(page_items, list):
-            items.extend(item for item in page_items if isinstance(item, dict))
+            normalized_page_items = [item for item in page_items if isinstance(item, dict)]
+            items.extend(normalized_page_items)
+            page_counts.append({'page': page, 'count': len(normalized_page_items)})
+            for item in normalized_page_items:
+                raw_ids.append(_extract_response_dedupe_key(item))
 
         pages = payload.get('pages')
-        if not isinstance(pages, int):
-            break
+        total_hint = raw_total if isinstance(raw_total, int) and raw_total > 0 else None
+        pages_by_total = ((total_hint + per_page - 1) // per_page) if total_hint else None
+        pages_by_expected = ((expected_count_hint + per_page - 1) // per_page) if isinstance(expected_count_hint, int) and expected_count_hint > 0 else None
+        pages_hint = pages if isinstance(pages, int) and pages > 0 else None
+        max_pages_hint = max(
+            value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
+        ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else None
+
         page += 1
-        if page >= pages:
+        if max_pages_hint is not None and page >= max_pages_hint:
+            break
+        if not page_items:
+            break
+        if page >= 200:
             break
 
-    return items, pages_loaded, raw_total
+    return items, pages_loaded, raw_total, page_counts, raw_ids
 
 
 def _extract_collection_entries(collection: dict) -> list[dict]:
@@ -802,16 +891,21 @@ async def _fetch_followup_negotiations_from_collections(
     urls_processed = 0
     pages_loaded = 0
     collection_diagnostics: list[dict[str, object]] = []
+    collection_url_state_index = _build_collection_url_state_index(payload)
 
     for url_or_path in _extract_collection_urls(payload):
         path = _normalize_hh_url_to_path(url_or_path)
         if not path:
             continue
         urls_processed += 1
-        collection_state = _extract_collection_state_from_path(path)
-        collection_name = _extract_collection_name_by_state(payload, collection_state)
+        indexed_state = collection_url_state_index.get(_strip_pagination_query(path), {})
+        collection_state_raw = indexed_state.get('state') or _extract_collection_state_from_path(path)
+        collection_state = collection_state_raw if isinstance(collection_state_raw, str) and collection_state_raw else 'unknown'
+        collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
+        collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
         collection_items_total = 0
         collection_added_after_dedupe_hint = 0
+        collection_page_counts: list[dict[str, int]] = []
         page = 0
         per_page = 50
         while True:
@@ -837,6 +931,7 @@ async def _fetch_followup_negotiations_from_collections(
             pages_loaded += 1
             page_items = page_payload.get('items') if isinstance(page_payload.get('items'), list) else []
             collection_items_total += len(page_items)
+            collection_page_counts.append({'page': page, 'count': len(page_items)})
 
             for item in page_items:
                 if not isinstance(item, dict):
@@ -871,9 +966,11 @@ async def _fetch_followup_negotiations_from_collections(
         collection_diagnostics.append(
             {
                 'state': collection_state,
+                'logical_state': _normalize_state_alias(collection_state),
                 'state_name': collection_name,
                 'url': path,
                 'fetched_raw_count': collection_items_total,
+                'page_counts': collection_page_counts,
                 'added_raw_candidates': collection_added_after_dedupe_hint,
             }
         )
@@ -906,6 +1003,44 @@ def _extract_collection_state_from_path(path: str) -> str:
     params = _extract_query_params_from_path(path)
     state = params.get('status') or params.get('state') or ''
     return state if state else 'unknown'
+
+
+def _strip_pagination_query(path: str) -> str:
+    params = _extract_query_params_from_path(path)
+    filtered_params = {key: value for key, value in params.items() if key not in {'page', 'per_page'}}
+    base = path.split('?', 1)[0]
+    if not filtered_params:
+        return base
+    query = '&'.join(f'{key}={value}' for key, value in sorted(filtered_params.items()))
+    return f'{base}?{query}'
+
+
+def _build_collection_url_state_index(payload: dict) -> dict[str, dict[str, str]]:
+    index: dict[str, dict[str, str]] = {}
+    collections = payload.get('collections')
+    if not isinstance(collections, list):
+        return index
+
+    for collection in collections:
+        if not isinstance(collection, dict):
+            continue
+        for entry in _extract_collection_entries(collection):
+            state = entry.get('id')
+            state_name = entry.get('name')
+            if not isinstance(state, str) or not state:
+                continue
+            for key in ('url', 'items_url', 'negotiations_url'):
+                raw_url = entry.get(key)
+                if not isinstance(raw_url, str) or not raw_url:
+                    continue
+                normalized_path = _normalize_hh_url_to_path(raw_url)
+                if not normalized_path:
+                    continue
+                index[_strip_pagination_query(normalized_path)] = {
+                    'state': state,
+                    'state_name': state_name if isinstance(state_name, str) else state,
+                }
+    return index
 
 
 def _extract_collection_name_by_state(payload: dict, state: str) -> str:
@@ -949,6 +1084,47 @@ def _extract_summary_by_state(payload: dict, *, state_names: dict[str, str] | No
                 }
             )
     return summary
+
+
+def _normalize_state_alias(state: str) -> str:
+    match = STATE_ALIAS_RE.match(state)
+    if not match:
+        return state
+    base = match.group('base')
+    return base if base else state
+
+
+def _is_state_alias(state: str) -> bool:
+    return STATE_ALIAS_RE.match(state) is not None
+
+
+def _build_state_alias_groups(
+    *,
+    summary_counts_raw_map: dict[str, int],
+    summary_names_map: dict[str, str],
+    fetched_counts_map: dict[str, int],
+) -> list[dict[str, object]]:
+    grouped_states: dict[str, list[str]] = {}
+    all_states = set(summary_counts_raw_map) | set(fetched_counts_map)
+    for state in all_states:
+        logical_state = _normalize_state_alias(state)
+        grouped_states.setdefault(logical_state, []).append(state)
+
+    groups: list[dict[str, object]] = []
+    for logical_state in sorted(grouped_states):
+        aliases = sorted(grouped_states[logical_state])
+        summary_counts_by_alias = {alias: summary_counts_raw_map.get(alias, 0) for alias in aliases}
+        groups.append(
+            {
+                'logical_state': logical_state,
+                'state_name': summary_names_map.get(logical_state) or logical_state,
+                'aliases': aliases,
+                'summary_counts_by_alias': summary_counts_by_alias,
+                'normalized_summary_count': max(summary_counts_by_alias.values()) if summary_counts_by_alias else 0,
+                'fetched_detailed_count': fetched_counts_map.get(logical_state, 0),
+            }
+        )
+    return groups
 
 
 def _extract_response_dedupe_key(item: dict) -> str:
