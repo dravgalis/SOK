@@ -150,10 +150,7 @@ async def get_vacancy_responses(
     access_token = _require_access_token(request)
 
     async with httpx.AsyncClient(timeout=20.0) as client:
-        responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
-    all_items = responses_payload.get('items')
-    if not isinstance(all_items, list):
-        all_items = []
+        all_items = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
     total = len(all_items)
 
     if all:
@@ -177,8 +174,6 @@ async def get_vacancy_responses(
         'page': resolved_page,
         'per_page': effective_per_page,
         'pages': pages,
-        'summary_total_raw': responses_payload.get('summary_total_raw', 0),
-        'state_alias_groups': responses_payload.get('state_alias_groups', []),
         'full_export': all,
     }
 
@@ -306,13 +301,15 @@ async def _fetch_paginated_vacancies(
     return all_items
 
 
-async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
+async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> list[dict[str, object | None]]:
     raw_items, _, _, _, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
         params={'status': 'any'},
     )
+    summary_by_state = _extract_summary_by_state(payload)
+    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -327,11 +324,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         seen_response_ids.add(response_id)
         unique_items.append(normalized_item)
 
-    return {
-        'items': unique_items,
-        'summary_total_raw': 0,
-        'state_alias_groups': [],
-    }
+    return unique_items
 
 
 def _count_items_by_state(items: list[dict]) -> dict[str, int]:
