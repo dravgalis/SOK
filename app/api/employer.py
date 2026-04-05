@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from html import unescape
 from urllib.parse import urlparse
 
 import httpx
@@ -161,6 +162,7 @@ async def get_vacancy_responses(
     all_items = responses_payload.get('items')
     if not isinstance(all_items, list):
         all_items = []
+    all_items.sort(key=_response_sort_key, reverse=True)
     total = len(all_items)
 
     if all:
@@ -328,6 +330,7 @@ async def _fetch_paginated_vacancies(
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
     vacancy_payload = await _hh_get(client, f'/vacancies/{vacancy_id}', access_token=access_token, allow_404=True)
     hh_total_from_vacancy = _extract_responses_count(vacancy_payload) if vacancy_payload.get('_status_code') != 404 else 0
+    vacancy_criteria = _extract_vacancy_criteria(vacancy_payload if vacancy_payload.get('_status_code') != 404 else {})
 
     seed_payload = await _hh_get(
         client,
@@ -380,6 +383,13 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
 
     for item in merged_raw_items:
         normalized_item = _normalize_response(item)
+        score, score_breakdown = _score_candidate_against_vacancy(
+            vacancy_criteria=vacancy_criteria,
+            vacancy_payload=vacancy_payload if isinstance(vacancy_payload, dict) else {},
+            response_item=item,
+        )
+        normalized_item['score'] = score
+        normalized_item['score_breakdown'] = score_breakdown
         response_id = normalized_item.get('response_id')
         if not isinstance(response_id, str) or not response_id:
             raw_items_without_id += 1
@@ -1328,6 +1338,242 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
         'phone': phone,
         'email': email,
     }
+
+
+def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, object]]:
+    requirements = vacancy_payload.get('requirements') if isinstance(vacancy_payload.get('requirements'), dict) else {}
+    key_skills = vacancy_payload.get('key_skills') if isinstance(vacancy_payload.get('key_skills'), list) else []
+    languages = vacancy_payload.get('languages') if isinstance(vacancy_payload.get('languages'), list) else []
+    working_days = vacancy_payload.get('working_days') if isinstance(vacancy_payload.get('working_days'), list) else []
+
+    criteria: dict[str, dict[str, object]] = {}
+
+    skill_names = _extract_names_from_list(key_skills)
+    if skill_names:
+        criteria['skills'] = {'importance': 'required', 'expected': skill_names}
+
+    area = vacancy_payload.get('area') if isinstance(vacancy_payload.get('area'), dict) else {}
+    area_name = area.get('name') if isinstance(area.get('name'), str) and area.get('name').strip() else None
+    if area_name:
+        criteria['location'] = {'importance': 'preferred', 'expected': [area_name]}
+
+    salary = vacancy_payload.get('salary') if isinstance(vacancy_payload.get('salary'), dict) else {}
+    salary_from = salary.get('from')
+    salary_to = salary.get('to')
+    if isinstance(salary_from, (int, float)) or isinstance(salary_to, (int, float)):
+        criteria['salary'] = {
+            'importance': 'preferred',
+            'expected': {'from': salary_from if isinstance(salary_from, (int, float)) else None, 'to': salary_to if isinstance(salary_to, (int, float)) else None},
+        }
+
+    experience = vacancy_payload.get('experience') if isinstance(vacancy_payload.get('experience'), dict) else {}
+    experience_name = experience.get('name') if isinstance(experience.get('name'), str) and experience.get('name').strip() else None
+    if experience_name:
+        criteria['experience'] = {'importance': 'required', 'expected': [experience_name]}
+
+    schedule = vacancy_payload.get('schedule') if isinstance(vacancy_payload.get('schedule'), dict) else {}
+    schedule_name = schedule.get('name') if isinstance(schedule.get('name'), str) and schedule.get('name').strip() else None
+    if schedule_name:
+        criteria['work_format'] = {'importance': 'preferred', 'expected': [schedule_name]}
+
+    employment = vacancy_payload.get('employment') if isinstance(vacancy_payload.get('employment'), dict) else {}
+    employment_name = employment.get('name') if isinstance(employment.get('name'), str) and employment.get('name').strip() else None
+    if employment_name:
+        criteria['employment_type'] = {'importance': 'required', 'expected': [employment_name]}
+
+    if schedule_name:
+        criteria['schedule'] = {'importance': 'preferred', 'expected': [schedule_name]}
+    elif working_days:
+        criteria['schedule'] = {'importance': 'preferred', 'expected': _extract_names_from_list(working_days)}
+
+    language_names = _extract_names_from_list(languages)
+    if language_names:
+        criteria['language'] = {'importance': 'preferred', 'expected': language_names}
+
+    requirement_text_chunks: list[str] = []
+    for key in ('requirement', 'responsibility'):
+        value = requirements.get(key)
+        if isinstance(value, str) and value.strip():
+            requirement_text_chunks.append(_normalize_text(value))
+    if requirement_text_chunks:
+        criteria['additional_requirements'] = {'importance': 'required', 'expected': requirement_text_chunks}
+
+    return criteria
+
+
+def _score_candidate_against_vacancy(
+    *,
+    vacancy_criteria: dict[str, dict[str, object]],
+    vacancy_payload: dict,
+    response_item: dict,
+) -> tuple[int | None, list[dict[str, object]]]:
+    if not vacancy_criteria:
+        return None, []
+
+    criterion_weights = {
+        'skills': 22,
+        'location': 8,
+        'salary': 10,
+        'experience': 18,
+        'work_format': 10,
+        'employment_type': 10,
+        'schedule': 8,
+        'language': 6,
+        'additional_requirements': 8,
+    }
+
+    candidate_profile = _extract_candidate_profile(response_item)
+    breakdown: list[dict[str, object]] = []
+    total_weight = 0
+    earned_weight = 0.0
+
+    for criterion, config in vacancy_criteria.items():
+        weight = criterion_weights.get(criterion, 5)
+        importance = config.get('importance') if isinstance(config.get('importance'), str) else 'preferred'
+        if importance == 'required':
+            weight = int(round(weight * 1.5))
+
+        expected = config.get('expected')
+        if not expected:
+            continue
+
+        match_ratio, reason = _match_criterion(criterion=criterion, expected=expected, candidate_profile=candidate_profile, vacancy_payload=vacancy_payload)
+        points = round(weight * match_ratio, 2)
+        total_weight += weight
+        earned_weight += points
+
+        breakdown.append(
+            {
+                'criterion': criterion,
+                'importance': importance,
+                'weight': weight,
+                'points': points,
+                'max_points': weight,
+                'matched': match_ratio >= 0.99,
+                'match_ratio': round(match_ratio, 3),
+                'reason': reason,
+            }
+        )
+
+    if total_weight == 0:
+        return None, []
+
+    score = int(round((earned_weight / total_weight) * 100))
+    return max(0, min(score, 100)), breakdown
+
+
+def _extract_candidate_profile(item: dict) -> dict[str, object]:
+    applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
+    salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
+    languages = resume.get('language') if isinstance(resume.get('language'), list) else resume.get('languages') if isinstance(resume.get('languages'), list) else []
+
+    return {
+        'skills': _extract_names_from_list(resume.get('skill_set') if isinstance(resume.get('skill_set'), list) else []),
+        'location': [area.get('name')] if isinstance(area.get('name'), str) and area.get('name').strip() else [],
+        'salary_from': salary.get('from') if isinstance(salary.get('from'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
+        'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
+        'experience': [value for value in (resume.get('total_experience'), resume.get('experience')) if isinstance(value, str) and value.strip()],
+        'work_format': _extract_names_from_list(resume.get('schedules') if isinstance(resume.get('schedules'), list) else []),
+        'employment_type': _extract_names_from_list(resume.get('employments') if isinstance(resume.get('employments'), list) else []),
+        'schedule': _extract_names_from_list(resume.get('schedules') if isinstance(resume.get('schedules'), list) else []),
+        'language': _extract_names_from_list(languages),
+        'summary_text': _normalize_text(
+            ' '.join(
+                value
+                for value in (
+                    resume.get('title'),
+                    resume.get('skills'),
+                    resume.get('skill_set') if isinstance(resume.get('skill_set'), str) else None,
+                    resume.get('professional_roles') if isinstance(resume.get('professional_roles'), str) else None,
+                    item.get('cover_letter'),
+                    item.get('message'),
+                )
+                if isinstance(value, str) and value.strip()
+            )
+        ),
+    }
+
+
+def _match_criterion(*, criterion: str, expected: object, candidate_profile: dict[str, object], vacancy_payload: dict) -> tuple[float, str]:
+    if criterion in {'skills', 'location', 'experience', 'work_format', 'employment_type', 'schedule', 'language'}:
+        expected_tokens = _normalize_tokens(expected if isinstance(expected, list) else [])
+        candidate_tokens = _normalize_tokens(candidate_profile.get(criterion) if isinstance(candidate_profile.get(criterion), list) else [])
+        if not expected_tokens:
+            return 0.0, 'Критерий вакансии не заполнен.'
+        if not candidate_tokens:
+            return 0.0, 'Нет данных кандидата для сравнения.'
+        overlap = len(expected_tokens & candidate_tokens)
+        ratio = overlap / max(len(expected_tokens), 1)
+        return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
+
+    if criterion == 'salary' and isinstance(expected, dict):
+        candidate_from = candidate_profile.get('salary_from')
+        if not isinstance(candidate_from, (int, float)):
+            return 0.0, 'У кандидата не указаны зарплатные ожидания.'
+        expected_from = expected.get('from')
+        expected_to = expected.get('to')
+        if isinstance(expected_to, (int, float)) and candidate_from > expected_to:
+            return 0.0, 'Ожидания кандидата выше вилки.'
+        if isinstance(expected_from, (int, float)) and candidate_from < expected_from:
+            return 0.7, 'Ожидания ниже минимальной границы.'
+        return 1.0, 'Зарплатные ожидания попадают в вилку.'
+
+    if criterion == 'additional_requirements' and isinstance(expected, list):
+        summary_text = candidate_profile.get('summary_text') if isinstance(candidate_profile.get('summary_text'), str) else ''
+        if not summary_text:
+            return 0.0, 'Нет текстовых данных кандидата для проверки.'
+        matched = 0
+        for chunk in expected:
+            if not isinstance(chunk, str):
+                continue
+            chunk_tokens = [token for token in _normalize_text(chunk).split() if len(token) >= 4]
+            if chunk_tokens and any(token in summary_text for token in chunk_tokens):
+                matched += 1
+        if not expected:
+            return 0.0, 'Требования не указаны.'
+        return matched / len(expected), f'Совпало {matched} из {len(expected)} текстовых требований.'
+
+    return 0.0, 'Нет логики сравнения для критерия.'
+
+
+def _extract_names_from_list(values: list[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            result.append(value.strip())
+            continue
+        if isinstance(value, dict):
+            name = value.get('name')
+            if isinstance(name, str) and name.strip():
+                result.append(name.strip())
+    return result
+
+
+def _normalize_text(value: str) -> str:
+    decoded = unescape(value)
+    no_tags = re.sub(r'<[^>]+>', ' ', decoded)
+    normalized = re.sub(r'\s+', ' ', no_tags).strip().lower()
+    return normalized
+
+
+def _normalize_tokens(values: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if normalized:
+            tokens.add(normalized)
+    return tokens
+
+
+def _response_sort_key(item: dict[str, object | None]) -> tuple[int, int, str]:
+    score_raw = item.get('score')
+    score = score_raw if isinstance(score_raw, int) else -1
+    has_score = 1 if isinstance(score_raw, int) else 0
+    created_at = item.get('response_created_at')
+    created_at_key = created_at if isinstance(created_at, str) else ''
+    return has_score, score, created_at_key
 
 
 def _extract_candidate_name(item: dict, applicant: dict, candidate: dict, resume: dict) -> str | None:
