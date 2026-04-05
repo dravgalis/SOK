@@ -27,6 +27,16 @@ type VacancyResponse = {
   resume_url?: string | null;
   phone?: string | null;
   email?: string | null;
+  score?: number | null;
+  score_breakdown?: Array<{
+    criterion: string;
+    importance: string;
+    weight: number;
+    points: number;
+    max_points: number;
+    matched: boolean;
+    reason: string;
+  }>;
 };
 
 type ResponsesSummaryItem = {
@@ -41,7 +51,6 @@ type VacancyResponsesPayload = {
   total?: number;
   count?: number;
   loaded_count?: number;
-  hh_total?: number;
   page?: number;
   per_page?: number;
   pages?: number;
@@ -49,6 +58,7 @@ type VacancyResponsesPayload = {
 
 const DEFAULT_RESPONSES_PER_PAGE = 25;
 const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50, 100, 200] as const;
+type ResponsesSortMode = 'score' | 'response_date';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -81,6 +91,41 @@ function hasVisibleCandidateFields(response: VacancyResponse): boolean {
   );
 }
 
+function formatScoreValue(score?: number | null): string {
+  return typeof score === 'number' ? `Score: ${score}` : 'Score: —';
+}
+
+function buildScoreColorMap(responses: VacancyResponse[]): Map<number, string> {
+  const sortedUniqueScores = Array.from(
+    new Set(
+      responses
+        .map((response) => response.score)
+        .filter((score): score is number => typeof score === 'number')
+        .sort((left, right) => right - left)
+    )
+  );
+
+  const colorSteps = ['score-chip-high', 'score-chip-mid-high', 'score-chip-mid', 'score-chip-low'];
+  const map = new Map<number, string>();
+
+  if (sortedUniqueScores.length === 0) {
+    return map;
+  }
+
+  sortedUniqueScores.forEach((score, index) => {
+    const percentilePosition = sortedUniqueScores.length === 1 ? 0 : index / (sortedUniqueScores.length - 1);
+    const colorIndex = Math.min(Math.floor(percentilePosition * colorSteps.length), colorSteps.length - 1);
+    map.set(score, colorSteps[colorIndex]);
+  });
+
+  return map;
+}
+
+function getScoreColorClass(score: number | null | undefined, scoreColorMap: Map<number, string>): string {
+  if (typeof score !== 'number') return 'score-chip-neutral';
+  return scoreColorMap.get(score) ?? 'score-chip-neutral';
+}
+
 export function VacancyDetailsPage() {
   const { vacancyId } = useParams<{ vacancyId: string }>();
   const [vacancy, setVacancy] = useState<VacancyDetails | null>(null);
@@ -89,8 +134,8 @@ export function VacancyDetailsPage() {
   const [responsesPage, setResponsesPage] = useState(1);
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
-  const [hhTotalCount, setHhTotalCount] = useState<number | null>(null);
   const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
+  const [sortMode, setSortMode] = useState<ResponsesSortMode>('score');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -144,15 +189,7 @@ export function VacancyDetailsPage() {
                 ? responsesPayload.count
                 : 0;
 
-        const hhTotal =
-          typeof responsesPayload.hh_total === 'number'
-            ? responsesPayload.hh_total
-            : typeof vacancyPayload.responses_count === 'number'
-              ? vacancyPayload.responses_count
-              : null;
-
         setResponsesCount(loadedResponses);
-        setHhTotalCount(hhTotal);
         setResponsesPages(typeof responsesPayload.pages === 'number' ? responsesPayload.pages : 1);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
@@ -170,6 +207,29 @@ export function VacancyDetailsPage() {
     if (typeof vacancy.archived === 'boolean') return vacancy.archived ? 'Архивная' : 'Активная';
     return vacancy.status || '—';
   }, [vacancy]);
+
+  const visibleResponses = useMemo(() => {
+    const filtered = responses.filter(hasVisibleCandidateFields);
+    return [...filtered].sort((left, right) => {
+      if (sortMode === 'response_date') {
+        const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
+        const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
+        return rightDate - leftDate;
+      }
+
+      const leftScore = typeof left.score === 'number' ? left.score : -1;
+      const rightScore = typeof right.score === 'number' ? right.score : -1;
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
+      }
+
+      const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
+      const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
+      return rightDate - leftDate;
+    });
+  }, [responses, sortMode]);
+
+  const scoreColorMap = useMemo(() => buildScoreColorMap(visibleResponses), [visibleResponses]);
 
   if (loading) {
     return (
@@ -210,8 +270,6 @@ export function VacancyDetailsPage() {
     );
   }
 
-  const visibleResponses = responses.filter(hasVisibleCandidateFields);
-
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide vacancy-details-layout">
@@ -226,10 +284,6 @@ export function VacancyDetailsPage() {
             <span>Дата публикации: {formatDate(vacancy.published_at)}</span>
             <span>Дата архивирования: {formatDate(vacancy.archived_at)}</span>
             <span>Отклики (доступно): {responsesCount}</span>
-            {typeof hhTotalCount === 'number' ? <span>По счётчику HH: {hhTotalCount}</span> : null}
-            {typeof hhTotalCount === 'number' && responsesCount < hhTotalCount ? (
-              <span>Доступно меньше, чем в счётчике HH: {responsesCount} из {hhTotalCount}</span>
-            ) : null}
           </div>
         </header>
 
@@ -252,6 +306,14 @@ export function VacancyDetailsPage() {
                     {value}
                   </option>
                 ))}
+              </select>
+            </label>
+
+            <label>
+              Сортировка:{' '}
+              <select value={sortMode} onChange={(event) => setSortMode(event.target.value as ResponsesSortMode)}>
+                <option value="score">По скору</option>
+                <option value="response_date">По дате отклика</option>
               </select>
             </label>
 
@@ -281,9 +343,14 @@ export function VacancyDetailsPage() {
 
                 return (
                   <li key={response.response_id} className="response-card">
+                    <div className="response-row response-row-head">
+                      <div className="response-primary">
+                        <strong>#{displayIndex}</strong>
+                        <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
+                      </div>
+                      <span className={`score-chip ${getScoreColorClass(response.score, scoreColorMap)}`}>{formatScoreValue(response.score)}</span>
+                    </div>
                     <div className="response-row">
-                      <strong>#{displayIndex}</strong>
-                      <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
                       {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
                       {response.status ? <span>Статус: {response.status}</span> : null}
                     </div>
