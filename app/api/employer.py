@@ -1018,6 +1018,10 @@ def _build_state_alias_groups(
 
 
 def _extract_response_dedupe_key(item: dict) -> str:
+    response_id = _extract_response_id(item)
+    if response_id:
+        return f'response_id:{response_id}'
+
     for key in ('id', 'response_id', 'negotiation_id'):
         value = item.get(key)
         if value is not None:
@@ -1034,6 +1038,26 @@ def _extract_response_dedupe_key(item: dict) -> str:
                 return f'topic_id:{raw}'
 
     return f'fallback:{id(item)}'
+
+
+def _extract_response_id(item: dict) -> str | None:
+    for key in ('id', 'response_id', 'negotiation_id'):
+        value = item.get(key)
+        if value is None:
+            continue
+        raw = str(value).strip()
+        if raw:
+            return raw
+
+    topic = item.get('topic')
+    if isinstance(topic, dict):
+        topic_id = topic.get('id')
+        if topic_id is not None:
+            raw = str(topic_id).strip()
+            if raw:
+                return raw
+
+    return None
 
 
 def _is_real_response_item(item: object) -> bool:
@@ -1175,7 +1199,7 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
     )
 
     return {
-        'response_id': str(item.get('id', '')),
+        'response_id': _extract_response_id(item) or '',
         'candidate_name': _extract_candidate_name(item, applicant, candidate, resume),
         'resume_title': resume.get('title') if isinstance(resume.get('title'), str) else None,
         'age': age,
