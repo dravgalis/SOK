@@ -308,6 +308,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         vacancy_id=vacancy_id,
         params={'status': 'any'},
     )
+    summary_by_state = _extract_summary_by_state(payload)
+    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
