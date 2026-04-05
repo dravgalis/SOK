@@ -301,6 +301,55 @@ p {
   align-items: center;
 }
 
+.response-row-head {
+  justify-content: space-between;
+}
+
+.response-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.score-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 86px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.score-chip-high {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.score-chip-mid-high {
+  background: #ecfccb;
+  color: #3f6212;
+}
+
+.score-chip-mid {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.score-chip-low {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.score-chip-neutral {
+  background: #e2e8f0;
+  color: #334155;
+}
+
 .response-card span {
   color: #475569;
 }
