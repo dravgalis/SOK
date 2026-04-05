@@ -201,6 +201,7 @@ async def get_vacancy_responses(
         'visibility_gap_note': responses_payload['visibility_gap_note'],
         'can_fetch_all_detailed_items': responses_payload['can_fetch_all_detailed_items'],
         'api_limitation_states': responses_payload['api_limitation_states'],
+        'fallback_fetches': responses_payload['fallback_fetches'],
         'full_export': all,
     }
 
@@ -451,6 +452,22 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         dedupe_keys.add(dedupe_key)
         raw_items.append(item)
 
+    fallback_fetches: list[dict[str, object]] = []
+    primary_total_for_gap = summary_total if summary_total > 0 else total_from_vacancy
+    primary_source_items = [item for item in raw_items if _is_real_response_item(item)]
+    primary_missing = max(primary_total_for_gap - len(primary_source_items), 0)
+    if primary_missing > 0:
+        fallback_items, fallback_info = await _fetch_missing_negotiations_fallback(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            expected_total=primary_total_for_gap,
+            existing_items=raw_items,
+            existing_dedupe_keys=dedupe_keys,
+        )
+        raw_items.extend(fallback_items)
+        fallback_fetches = fallback_info
+
     items_before_filtering = len(raw_items)
     source_items = [item for item in raw_items if _is_real_response_item(item)]
     items_after_filtering = len(source_items)
@@ -541,6 +558,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         'visibility_gap_note': visibility_gap_note,
         'can_fetch_all_detailed_items': missing_items_count == 0,
         'api_limitation_states': api_limitation_states,
+        'fallback_fetches': fallback_fetches,
     }
 
 
@@ -786,6 +804,77 @@ async def _fetch_negotiations_pages(
     state: str,
     expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
+    return await _fetch_negotiations_by_params(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        params={'status': state},
+        expected_count_hint=expected_count_hint,
+    )
+
+
+async def _fetch_missing_negotiations_fallback(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    expected_total: int,
+    existing_items: list[dict],
+    existing_dedupe_keys: set[str],
+) -> tuple[list[dict], list[dict[str, object]]]:
+    fallback_variants: list[dict[str, str]] = [
+        {'status': 'any', 'archived': 'true'},
+        {'status': 'any', 'hidden': 'true'},
+        {'status': 'any', 'archived': 'true', 'hidden': 'true'},
+    ]
+    collected: list[dict] = []
+    diagnostics: list[dict[str, object]] = []
+
+    for params in fallback_variants:
+        items, pages_loaded, raw_total, page_counts, _ = await _fetch_negotiations_by_params(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            params=params,
+        )
+        added = 0
+        duplicates = 0
+        for item in items:
+            dedupe_key = _extract_response_dedupe_key(item)
+            if dedupe_key in existing_dedupe_keys:
+                duplicates += 1
+                continue
+            existing_dedupe_keys.add(dedupe_key)
+            existing_items.append(item)
+            collected.append(item)
+            added += 1
+        current_real_count = len([item for item in existing_items if _is_real_response_item(item)])
+        diagnostics.append(
+            {
+                'params': params,
+                'pages_loaded': pages_loaded,
+                'raw_total': raw_total,
+                'fetched_raw_count': len(items),
+                'added_after_dedupe': added,
+                'duplicates_skipped': duplicates,
+                'page_counts': page_counts,
+                'current_real_count': current_real_count,
+            }
+        )
+        if current_real_count >= expected_total:
+            break
+
+    return collected, diagnostics
+
+
+async def _fetch_negotiations_by_params(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    params: dict[str, str],
+    expected_count_hint: int | None = None,
+) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
     page = 0
     per_page = 50
     pages_loaded = 0
@@ -801,7 +890,7 @@ async def _fetch_negotiations_pages(
             access_token=access_token,
             params={
                 'vacancy_id': vacancy_id,
-                'status': state,
+                **params,
                 'page': str(page),
                 'per_page': str(per_page),
             },
