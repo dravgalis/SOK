@@ -377,21 +377,18 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'visibility_gap_note': None,
         }
 
-    states_processed, state_names = await _discover_response_states(
+    raw_items, pages_loaded, hh_total_raw, page_counts, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
-        seed_payload=payload,
+        params={'status': 'any'},
+        expected_count_hint=total_from_vacancy,
     )
     summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
     summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
-    pages_loaded = 0
-    hh_total_raw = _extract_hh_total_raw(payload)
-    any_status_total_raw = hh_total_raw
-    raw_items: list[dict] = []
+    deduped_items: list[dict] = []
     dedupe_keys: set[str] = set()
-    state_fetch_diagnostics: list[dict[str, object]] = []
     duplicates_skipped_total = 0
 
     for state in states_processed:
@@ -450,7 +447,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             duplicates_skipped_total += 1
             continue
         dedupe_keys.add(dedupe_key)
-        raw_items.append(item)
+        deduped_items.append(item)
 
     fallback_fetches: list[dict[str, object]] = []
     primary_total_for_gap = total_from_vacancy
@@ -507,10 +504,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
 
     normalized_items = [_normalize_response(item) for item in source_items]
     total_count = len(normalized_items)
-    base_total_for_gap = summary_total if summary_total > 0 else total_from_vacancy
-    missing_items_count = max(base_total_for_gap - total_count, 0)
-    vacancy_vs_any_gap = max(total_from_vacancy - any_status_total_raw, 0)
-    visibility_restricted_states = [row for row in missing_by_state if row.get('missing_count', 0) > 0]
+    missing_items_count = max(total_from_vacancy - total_count, 0)
+
     visibility_gap_note = None
     api_limitation_states = [
         row for row in state_diagnostics
@@ -538,23 +533,33 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         'fetched_by_state': fetched_by_state,
         'missing_by_state': missing_by_state,
         'missing_items_count': missing_items_count,
-        'state_diagnostics': state_diagnostics,
-        'state_fetch_diagnostics': state_fetch_diagnostics,
-        'collection_diagnostics': collection_diagnostics,
+        'state_diagnostics': [],
+        'state_fetch_diagnostics': [
+            {
+                'state': 'any',
+                'pages_loaded': pages_loaded,
+                'page_counts': page_counts,
+                'fetched_raw_count': len(raw_items),
+                'added_after_dedupe': len(deduped_items),
+                'duplicates_skipped': duplicates_skipped_total,
+                'state_total_raw': hh_total_raw,
+            }
+        ],
+        'collection_diagnostics': [],
         'count': total_count,
-        'detailed_items_count': len(normalized_items),
+        'detailed_items_count': total_count,
         'total_from_vacancy': total_from_vacancy,
-        'hh_total_raw': hh_total_raw,
+        'hh_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
         'pages_loaded': pages_loaded,
         'items_before_filtering': items_before_filtering,
         'items_after_filtering': items_after_filtering,
-        'states_processed': states_processed,
-        'summary_total_hint': summary_total,
-        'collections_urls_processed': followup_debug['urls_processed'],
-        'collections_pages_loaded': followup_debug['pages_loaded'],
-        'collections_errors': followup_debug['errors'],
-        'any_status_total_raw': any_status_total_raw,
-        'vacancy_vs_any_gap': vacancy_vs_any_gap,
+        'states_processed': ['any'],
+        'summary_total_hint': 0,
+        'collections_urls_processed': 0,
+        'collections_pages_loaded': 0,
+        'collections_errors': [],
+        'any_status_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
+        'vacancy_vs_any_gap': max(total_from_vacancy - (hh_total_raw if isinstance(hh_total_raw, int) else 0), 0),
         'visibility_gap_note': visibility_gap_note,
         'can_fetch_all_detailed_items': missing_items_count == 0,
         'api_limitation_states': api_limitation_states,
