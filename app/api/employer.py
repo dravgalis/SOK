@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from html import unescape
@@ -774,73 +775,76 @@ async def _fetch_negotiations_by_params(
     params: dict[str, str],
     expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
-    page = 0
-    per_page = 50
-    pages_loaded = 0
+    per_page = 200
     items: list[dict] = []
     raw_total: int | None = None
     page_counts: list[dict[str, int]] = []
     raw_ids: list[str] = []
+    normalized_params = dict(params)
+    normalized_params['status'] = 'any'
 
-    while True:
-        normalized_params = dict(params)
-        status = normalized_params.get('status')
-        if isinstance(status, str) and status:
-            normalized_params['status'] = _normalize_state_alias(status)
-        request_params = {
+    first_payload = await _hh_get(
+        client,
+        '/negotiations',
+        access_token=access_token,
+        params={
             'vacancy_id': vacancy_id,
             **normalized_params,
-            'page': str(page),
+            'page': '0',
             'per_page': str(per_page),
             'all': 'true',
-        }
-        payload = await _hh_get(
-            client,
-            '/negotiations',
-            access_token=access_token,
-            params=request_params,
-            allow_404=True,
-        )
-        if payload.get('_status_code') == 404:
-            logger.info('HH negotiations debug: vacancy_id=%s params=%s status=404', vacancy_id, request_params)
-            break
+        },
+        allow_404=True,
+    )
+    if first_payload.get('_status_code') == 404:
+        return [], 0, None, [], []
 
-        pages_loaded += 1
-        raw_total = _extract_hh_total_raw(payload)
+    raw_total = _extract_hh_total_raw(first_payload)
+    first_items_raw = first_payload.get('items') if isinstance(first_payload.get('items'), list) else []
+    first_items = [item for item in first_items_raw if isinstance(item, dict)]
+    items.extend(first_items)
+    page_counts.append({'page': 0, 'count': len(first_items)})
+    raw_ids.extend(_extract_response_dedupe_key(item) for item in first_items)
 
-        page_items = payload.get('items')
-        if isinstance(page_items, list):
-            normalized_page_items = [item for item in page_items if isinstance(item, dict)]
-            items.extend(normalized_page_items)
-            page_counts.append({'page': page, 'count': len(normalized_page_items)})
-            for item in normalized_page_items:
-                raw_ids.append(_extract_response_dedupe_key(item))
+    pages_hint = first_payload.get('pages') if isinstance(first_payload.get('pages'), int) else None
+    total_hint = raw_total if isinstance(raw_total, int) and raw_total > 0 else None
+    pages_by_total = ((total_hint + per_page - 1) // per_page) if total_hint else None
+    pages_by_expected = ((expected_count_hint + per_page - 1) // per_page) if isinstance(expected_count_hint, int) and expected_count_hint > 0 else None
+    max_pages_hint = max(
+        value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
+    ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else 1
+    max_pages_hint = min(max_pages_hint, 200)
 
-        pages = payload.get('pages')
-        total_hint = raw_total if isinstance(raw_total, int) and raw_total > 0 else None
-        pages_by_total = ((total_hint + per_page - 1) // per_page) if total_hint else None
-        pages_by_expected = ((expected_count_hint + per_page - 1) // per_page) if isinstance(expected_count_hint, int) and expected_count_hint > 0 else None
-        pages_hint = pages if isinstance(pages, int) and pages > 0 else None
-        max_pages_hint = max(
-            value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
-        ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else None
+    if max_pages_hint > 1:
+        page_tasks = [
+            _hh_get(
+                client,
+                '/negotiations',
+                access_token=access_token,
+                params={
+                    'vacancy_id': vacancy_id,
+                    **normalized_params,
+                    'page': str(page),
+                    'per_page': str(per_page),
+                    'all': 'true',
+                },
+                allow_404=True,
+            )
+            for page in range(1, max_pages_hint)
+        ]
+        page_payloads = await asyncio.gather(*page_tasks, return_exceptions=True)
+        for page, payload in enumerate(page_payloads, start=1):
+            if isinstance(payload, Exception):
+                continue
+            if not isinstance(payload, dict) or payload.get('_status_code') == 404:
+                continue
+            page_items_raw = payload.get('items') if isinstance(payload.get('items'), list) else []
+            page_items = [item for item in page_items_raw if isinstance(item, dict)]
+            items.extend(page_items)
+            page_counts.append({'page': page, 'count': len(page_items)})
+            raw_ids.extend(_extract_response_dedupe_key(item) for item in page_items)
 
-        page += 1
-        logger.info(
-            'HH negotiations debug: vacancy_id=%s params=%s page_items=%s pages_loaded=%s raw_total=%s',
-            vacancy_id,
-            request_params,
-            len(page_items) if isinstance(page_items, list) else 0,
-            pages_loaded,
-            raw_total,
-        )
-        if max_pages_hint is not None and page >= max_pages_hint:
-            break
-        if not page_items:
-            break
-        if page >= 200:
-            break
-
+    pages_loaded = len(page_counts)
     return items, pages_loaded, raw_total, page_counts, raw_ids
 
 
@@ -903,101 +907,149 @@ async def _fetch_followup_negotiations_from_collections(
     vacancy_id: str,
     payload: dict,
 ) -> tuple[list[dict], dict[str, object]]:
+    collection_url_state_index = _build_collection_url_state_index(payload)
+    normalized_paths = [_normalize_hh_url_to_path(url_or_path) for url_or_path in _extract_collection_urls(payload)]
+    paths = [path for path in normalized_paths if path]
+
+    tasks = [
+        _fetch_single_collection_path(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            payload=payload,
+            path=path,
+            collection_url_state_index=collection_url_state_index,
+        )
+        for path in paths
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     collected: list[dict] = []
-    seen_details: set[str] = set()
     errors: list[str] = []
-    urls_processed = 0
     pages_loaded = 0
     collection_diagnostics: list[dict[str, object]] = []
-    collection_url_state_index = _build_collection_url_state_index(payload)
-
-    for url_or_path in _extract_collection_urls(payload):
-        path = _normalize_hh_url_to_path(url_or_path)
-        if not path:
+    for result in results:
+        if isinstance(result, Exception):
+            errors.append(str(result))
             continue
-        urls_processed += 1
-        indexed_state = collection_url_state_index.get(_strip_pagination_query(path), {})
-        collection_state_raw = indexed_state.get('state') or _extract_collection_state_from_path(path)
-        collection_state = collection_state_raw if isinstance(collection_state_raw, str) and collection_state_raw else 'unknown'
-        collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
-        collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
-        collection_items_total = 0
-        collection_added_after_dedupe_hint = 0
-        collection_page_counts: list[dict[str, int]] = []
-        page = 0
-        per_page = 50
-        while True:
-            try:
-                page_payload = await _hh_get(
-                    client,
-                    path.split('?', 1)[0],
-                    access_token=access_token,
-                    params={
-                        **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
-                        **_extract_query_params_from_path(path),
-                        'page': str(page),
-                        'per_page': str(per_page),
-                    },
-                    allow_404=True,
-                )
-            except HTTPException as exc:
-                errors.append(f'{path}: {exc.status_code}')
-                break
-            if page_payload.get('_status_code') == 404:
-                break
+        collected.extend(result['items'])
+        pages_loaded += int(result['pages_loaded'])
+        errors.extend(result['errors'])
+        collection_diagnostics.append(result['diagnostics'])
 
-            pages_loaded += 1
-            page_items = page_payload.get('items') if isinstance(page_payload.get('items'), list) else []
-            collection_items_total += len(page_items)
-            collection_page_counts.append({'page': page, 'count': len(page_items)})
+    return collected, {
+        'urls_processed': len(paths),
+        'pages_loaded': pages_loaded,
+        'errors': errors,
+        'collection_diagnostics': collection_diagnostics,
+    }
 
-            for item in page_items:
-                if not isinstance(item, dict):
-                    continue
-                if _is_real_response_item(item):
-                    collected.append(item)
-                    collection_added_after_dedupe_hint += 1
-                    continue
-                detail_path = _normalize_hh_url_to_path(
-                    str(item.get('negotiation_url') or item.get('url') or '')
-                )
-                if not detail_path or detail_path in seen_details:
-                    continue
-                seen_details.add(detail_path)
-                try:
-                    detail_payload = await _hh_get(client, detail_path, access_token=access_token, allow_404=True)
-                except HTTPException:
-                    continue
-                if detail_payload.get('_status_code') == 404:
-                    continue
-                if _is_real_response_item(detail_payload):
-                    collected.append(detail_payload)
-                    collection_added_after_dedupe_hint += 1
 
-            pages = page_payload.get('pages')
-            if not isinstance(pages, int):
-                break
-            page += 1
-            if page >= pages:
-                break
+async def _fetch_single_collection_path(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    payload: dict,
+    path: str,
+    collection_url_state_index: dict[str, dict[str, str]],
+) -> dict[str, object]:
+    indexed_state = collection_url_state_index.get(_strip_pagination_query(path), {})
+    collection_state_raw = indexed_state.get('state') or _extract_collection_state_from_path(path)
+    collection_state = collection_state_raw if isinstance(collection_state_raw, str) and collection_state_raw else 'unknown'
+    collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
+    collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
 
-        collection_diagnostics.append(
-            {
+    per_page = 200
+    base_path = path.split('?', 1)[0]
+    base_params = {
+        **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
+        **_extract_query_params_from_path(path),
+    }
+
+    errors: list[str] = []
+    first_payload = await _hh_get(
+        client,
+        base_path,
+        access_token=access_token,
+        params={**base_params, 'page': '0', 'per_page': str(per_page)},
+        allow_404=True,
+    )
+    if first_payload.get('_status_code') == 404:
+        return {
+            'items': [],
+            'pages_loaded': 0,
+            'errors': errors,
+            'diagnostics': {
                 'state': collection_state,
                 'logical_state': _normalize_state_alias(collection_state),
                 'state_name': collection_name,
                 'url': path,
-                'fetched_raw_count': collection_items_total,
-                'page_counts': collection_page_counts,
-                'added_raw_candidates': collection_added_after_dedupe_hint,
-            }
-        )
+                'fetched_raw_count': 0,
+                'page_counts': [],
+                'added_raw_candidates': 0,
+            },
+        }
 
-    return collected, {
-        'urls_processed': urls_processed,
-        'pages_loaded': pages_loaded,
+    pages = first_payload.get('pages') if isinstance(first_payload.get('pages'), int) and first_payload.get('pages') else 1
+    page_payloads: list[dict] = [first_payload]
+    if pages > 1:
+        tasks = [
+            _hh_get(
+                client,
+                base_path,
+                access_token=access_token,
+                params={**base_params, 'page': str(page), 'per_page': str(per_page)},
+                allow_404=True,
+            )
+            for page in range(1, pages)
+        ]
+        rest = await asyncio.gather(*tasks, return_exceptions=True)
+        for payload_item in rest:
+            if isinstance(payload_item, Exception):
+                errors.append(str(payload_item))
+                continue
+            if isinstance(payload_item, dict) and payload_item.get('_status_code') != 404:
+                page_payloads.append(payload_item)
+
+    collected: list[dict] = []
+    detail_urls: set[str] = set()
+    page_counts: list[dict[str, int]] = []
+    for page_index, page_payload in enumerate(page_payloads):
+        page_items = page_payload.get('items') if isinstance(page_payload.get('items'), list) else []
+        page_counts.append({'page': page_index, 'count': len(page_items)})
+        for item in page_items:
+            if not isinstance(item, dict):
+                continue
+            if _is_real_response_item(item):
+                collected.append(item)
+            else:
+                detail_path = _normalize_hh_url_to_path(str(item.get('negotiation_url') or item.get('url') or ''))
+                if detail_path:
+                    detail_urls.add(detail_path)
+
+    if detail_urls:
+        detail_tasks = [_hh_get(client, detail_path, access_token=access_token, allow_404=True) for detail_path in sorted(detail_urls)]
+        details = await asyncio.gather(*detail_tasks, return_exceptions=True)
+        for detail_payload in details:
+            if isinstance(detail_payload, Exception):
+                continue
+            if isinstance(detail_payload, dict) and detail_payload.get('_status_code') != 404 and _is_real_response_item(detail_payload):
+                collected.append(detail_payload)
+
+    return {
+        'items': collected,
+        'pages_loaded': len(page_payloads),
         'errors': errors,
-        'collection_diagnostics': collection_diagnostics,
+        'diagnostics': {
+            'state': collection_state,
+            'logical_state': _normalize_state_alias(collection_state),
+            'state_name': collection_name,
+            'url': path,
+            'fetched_raw_count': sum(row['count'] for row in page_counts),
+            'page_counts': page_counts,
+            'added_raw_candidates': len(collected),
+        },
     }
 
 
