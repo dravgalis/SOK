@@ -407,7 +407,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         score, score_breakdown = _score_candidate_against_vacancy(
             vacancy_criteria=vacancy_criteria,
             response_item=item,
-            resume_profile=None,
+            resume_profile=resume_profile if isinstance(resume_profile, dict) else None,
         )
         normalized_item['score'] = score
         normalized_item['score_breakdown'] = score_breakdown
@@ -422,10 +422,9 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         unique_items.append(normalized_item)
 
     logger.info(
-        'HH responses perf: vacancy_id=%s direct_pages_loaded=%s collection_pages_loaded=%s merged_candidates=%s unique_candidates=%s',
+        'HH responses perf: vacancy_id=%s direct_pages_loaded=%s merged_candidates=%s unique_candidates=%s',
         vacancy_id,
         direct_pages_loaded,
-        collection_debug.get('pages_loaded', 0),
         len(merged_raw_items),
         len(unique_items),
     )
@@ -802,33 +801,70 @@ async def _fetch_negotiations_by_params(
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
     per_page = 50
     all_items: list[dict] = []
-    raw_total: int | None = None
+    raw_total: int | None = 0
     page_counts: list[dict[str, int]] = []
     raw_ids: list[str] = []
     normalized_params = dict(params)
-    # HH API не гарантирует полный список через статусные выборки.
-    # Используем единый проход без перебора статусов + collections follow-up.
+    explicit_status = normalized_params.pop('status', None)
+    statuses = [explicit_status] if isinstance(explicit_status, str) and explicit_status and explicit_status != 'any' else NEGOTIATION_STATUSES
+
+    status_tasks = [
+        _fetch_negotiations_for_status(
+            client,
+            access_token=access_token,
+            vacancy_id=vacancy_id,
+            status=status,
+            base_params=normalized_params,
+            per_page=per_page,
+            expected_count_hint=expected_count_hint,
+        )
+        for status in statuses
+    ]
+    status_results = await asyncio.gather(*status_tasks, return_exceptions=True)
+    for result in status_results:
+        if isinstance(result, Exception):
+            continue
+        status_items, status_raw_total, status_page_counts = result
+        all_items.extend(status_items)
+        page_counts.extend(status_page_counts)
+        raw_ids.extend(_extract_response_dedupe_key(item) for item in status_items)
+        if isinstance(status_raw_total, int):
+            raw_total = (raw_total or 0) + status_raw_total
+
+    pages_loaded = len(page_counts)
+    return all_items, pages_loaded, raw_total, page_counts, raw_ids
+
+
+async def _fetch_negotiations_for_status(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    vacancy_id: str,
+    status: str,
+    base_params: dict[str, str],
+    per_page: int,
+    expected_count_hint: int | None,
+) -> tuple[list[dict], int | None, list[dict[str, int]]]:
     first_payload = await _hh_get(
         client,
         '/negotiations',
         access_token=access_token,
         params={
             'vacancy_id': vacancy_id,
-            **normalized_params,
+            **base_params,
+            'status': status,
             'page': '0',
             'per_page': str(per_page),
         },
         allow_404=True,
     )
     if first_payload.get('_status_code') == 404:
-        return [], 0, None, [], []
+        return [], None, []
 
     raw_total = _extract_hh_total_raw(first_payload)
     first_items_raw = first_payload.get('items') if isinstance(first_payload.get('items'), list) else []
-    first_items = [item for item in first_items_raw if isinstance(item, dict)]
-    all_items.extend(first_items)
-    page_counts = [{'page': 0, 'count': len(first_items)}]
-    raw_ids.extend(_extract_response_dedupe_key(item) for item in first_items)
+    items = [item for item in first_items_raw if isinstance(item, dict)]
+    page_counts: list[dict[str, int]] = [{'page': 0, 'count': len(items)}]
 
     pages_hint = first_payload.get('pages') if isinstance(first_payload.get('pages'), int) else None
     total_hint = raw_total if isinstance(raw_total, int) and raw_total > 0 else None
@@ -847,7 +883,8 @@ async def _fetch_negotiations_by_params(
                 access_token=access_token,
                 params={
                     'vacancy_id': vacancy_id,
-                    **normalized_params,
+                    **base_params,
+                    'status': status,
                     'page': str(page),
                     'per_page': str(per_page),
                 },
@@ -863,12 +900,10 @@ async def _fetch_negotiations_by_params(
                 continue
             page_items_raw = payload.get('items') if isinstance(payload.get('items'), list) else []
             page_items = [item for item in page_items_raw if isinstance(item, dict)]
-            all_items.extend(page_items)
+            items.extend(page_items)
             page_counts.append({'page': page, 'count': len(page_items)})
-            raw_ids.extend(_extract_response_dedupe_key(item) for item in page_items)
 
-    pages_loaded = len(page_counts)
-    return all_items, pages_loaded, raw_total, page_counts, raw_ids
+    return items, raw_total, page_counts
 
 
 def _extract_collection_entries(collection: dict) -> list[dict]:
