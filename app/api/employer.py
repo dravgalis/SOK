@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import re
+from html import unescape
 from urllib.parse import urlparse
+from urllib.parse import unquote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -161,6 +163,7 @@ async def get_vacancy_responses(
     all_items = responses_payload.get('items')
     if not isinstance(all_items, list):
         all_items = []
+    all_items.sort(key=_response_sort_key, reverse=True)
     total = len(all_items)
 
     if all:
@@ -328,6 +331,7 @@ async def _fetch_paginated_vacancies(
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
     vacancy_payload = await _hh_get(client, f'/vacancies/{vacancy_id}', access_token=access_token, allow_404=True)
     hh_total_from_vacancy = _extract_responses_count(vacancy_payload) if vacancy_payload.get('_status_code') != 404 else 0
+    vacancy_criteria = _extract_vacancy_criteria(vacancy_payload if vacancy_payload.get('_status_code') != 404 else {})
 
     seed_payload = await _hh_get(
         client,
@@ -377,9 +381,19 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     seen_response_ids: set[str] = set()
     raw_items_without_id = 0
     duplicate_items = 0
+    resumes_profiles = await _fetch_resumes_profiles(client, access_token=access_token, items=merged_raw_items)
 
     for item in merged_raw_items:
+        resume_id = _extract_resume_id(item)
+        resume_profile = resumes_profiles.get(resume_id) if resume_id else None
         normalized_item = _normalize_response(item)
+        score, score_breakdown = _score_candidate_against_vacancy(
+            vacancy_criteria=vacancy_criteria,
+            response_item=item,
+            resume_profile=resume_profile if isinstance(resume_profile, dict) else None,
+        )
+        normalized_item['score'] = score
+        normalized_item['score_breakdown'] = score_breakdown
         response_id = normalized_item.get('response_id')
         if not isinstance(response_id, str) or not response_id:
             raw_items_without_id += 1
@@ -1328,6 +1342,632 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
         'phone': phone,
         'email': email,
     }
+
+
+def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, object]]:
+    criteria: dict[str, dict[str, object]] = {}
+
+    def add_criterion(
+        *,
+        criterion_id: str,
+        expected: object,
+        compare_mode: str,
+        importance: str = 'preferred',
+        label: str | None = None,
+    ) -> None:
+        if not _has_meaningful_value(expected):
+            return
+        criteria[criterion_id] = {
+            'criterion': criterion_id,
+            'label': label or criterion_id,
+            'importance': importance,
+            'compare_mode': compare_mode,
+            'expected': expected,
+        }
+
+    # Явные, доменно-важные поля вакансии
+    add_criterion(
+        criterion_id='skills',
+        expected=_extract_names_from_list(vacancy_payload.get('key_skills') if isinstance(vacancy_payload.get('key_skills'), list) else []),
+        compare_mode='token_overlap',
+        importance='required',
+        label='Навыки',
+    )
+    add_criterion(
+        criterion_id='specialization',
+        expected=_extract_names_from_list(vacancy_payload.get('professional_roles') if isinstance(vacancy_payload.get('professional_roles'), list) else []),
+        compare_mode='token_overlap',
+        importance='required',
+        label='Специализация',
+    )
+
+    area = vacancy_payload.get('area') if isinstance(vacancy_payload.get('area'), dict) else {}
+    location_expected = [
+        value
+        for value in (
+            area.get('name'),
+            area.get('id'),
+            area.get('parent') if isinstance(area.get('parent'), str) else None,
+        )
+        if isinstance(value, str) and value.strip()
+    ]
+    add_criterion(
+        criterion_id='location',
+        expected=location_expected,
+        compare_mode='token_overlap',
+        importance='preferred',
+        label='Локация',
+    )
+
+    salary = vacancy_payload.get('salary') if isinstance(vacancy_payload.get('salary'), dict) else {}
+    salary_from = salary.get('from') if isinstance(salary.get('from'), (int, float)) else None
+    salary_to = salary.get('to') if isinstance(salary.get('to'), (int, float)) else None
+    salary_expected = {
+        'from': salary_from,
+        'to': salary_to,
+        'currency': salary.get('currency') if isinstance(salary.get('currency'), str) else None,
+    }
+    if salary_from is not None or salary_to is not None:
+        add_criterion(
+            criterion_id='salary',
+            expected=salary_expected,
+            compare_mode='salary_range',
+            importance='required',
+            label='Зарплата',
+        )
+
+    experience_values = _extract_single_name(vacancy_payload.get('experience'))
+    if experience_values:
+        experience_label = experience_values[0]
+        min_months, max_months = _parse_experience_range_months(experience_label)
+        add_criterion(
+            criterion_id='experience',
+            expected={
+                'label': experience_label,
+                'min_months': min_months,
+                'max_months': max_months,
+            },
+            compare_mode='experience_range',
+            importance='required',
+            label='Опыт',
+        )
+    add_criterion(
+        criterion_id='work_format',
+        expected=_normalize_work_formats(_extract_names_from_list(vacancy_payload.get('work_format') if isinstance(vacancy_payload.get('work_format'), list) else [])),
+        compare_mode='work_format_match',
+        importance='preferred',
+        label='Формат работы',
+    )
+    add_criterion(
+        criterion_id='employment_type',
+        expected=_extract_single_name(vacancy_payload.get('employment')),
+        compare_mode='token_overlap',
+        importance='required',
+        label='Тип занятости',
+    )
+    add_criterion(
+        criterion_id='language',
+        expected=_extract_names_from_list(vacancy_payload.get('languages') if isinstance(vacancy_payload.get('languages'), list) else []),
+        compare_mode='token_overlap',
+        importance='preferred',
+        label='Языки',
+    )
+    add_criterion(
+        criterion_id='formalization',
+        expected=_extract_single_name(vacancy_payload.get('driver_license_types'))
+        or _extract_single_name(vacancy_payload.get('accept_handicapped'))
+        or _extract_single_name(vacancy_payload.get('accept_kids')),
+        compare_mode='token_overlap',
+        importance='preferred',
+        label='Оформление',
+    )
+
+    remote_markers: list[str] = []
+    for key in ('work_format', 'working_days', 'schedule'):
+        value = vacancy_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            remote_markers.append(value)
+        elif isinstance(value, dict):
+            name = value.get('name')
+            if isinstance(name, str) and name.strip():
+                remote_markers.append(name)
+    add_criterion(
+        criterion_id='remote_mode',
+        expected=remote_markers,
+        compare_mode='token_overlap',
+        importance='preferred',
+        label='Удаленка / офис / гибрид',
+    )
+
+    # Дополнительные текстовые требования работодателя.
+    requirements = vacancy_payload.get('requirements') if isinstance(vacancy_payload.get('requirements'), dict) else {}
+    text_requirements: dict[str, str] = {}
+    for key, value in requirements.items():
+        if isinstance(value, str) and value.strip():
+            normalized = _normalize_text(value)
+            if normalized:
+                text_requirements[key] = normalized
+    if text_requirements:
+        add_criterion(
+            criterion_id='additional_requirements',
+            expected=text_requirements,
+            compare_mode='text_presence',
+            importance='required',
+            label='Дополнительные требования',
+        )
+
+    return criteria
+
+
+def _score_candidate_against_vacancy(
+    *,
+    vacancy_criteria: dict[str, dict[str, object]],
+    response_item: dict,
+    resume_profile: dict | None = None,
+) -> tuple[int | None, list[dict[str, object]]]:
+    if not vacancy_criteria:
+        return None, []
+
+    criterion_weights = {
+        'skills': 18,
+        'specialization': 18,
+        'location': 10,
+        'salary': 14,
+        'experience': 16,
+        'work_format': 10,
+        'employment_type': 12,
+        'language': 10,
+        'formalization': 8,
+        'remote_mode': 8,
+        'additional_requirements': 14,
+    }
+
+    candidate_profile = _extract_candidate_profile(response_item, resume_profile=resume_profile)
+    breakdown: list[dict[str, object]] = []
+    total_weight = 0
+    earned_weight = 0.0
+
+    for criterion, config in vacancy_criteria.items():
+        weight = criterion_weights.get(criterion, 5)
+        importance = config.get('importance') if isinstance(config.get('importance'), str) else 'preferred'
+        if importance == 'required':
+            weight = int(round(weight * 1.5))
+
+        expected = config.get('expected')
+        if not expected:
+            continue
+
+        compare_mode = config.get('compare_mode') if isinstance(config.get('compare_mode'), str) else 'token_overlap'
+        match_ratio, reason = _match_criterion(
+            criterion=criterion,
+            compare_mode=compare_mode,
+            expected=expected,
+            candidate_profile=candidate_profile,
+        )
+        points = round(weight * match_ratio, 2)
+        total_weight += weight
+        earned_weight += points
+
+        breakdown.append(
+            {
+                'criterion': criterion,
+                'label': config.get('label') if isinstance(config.get('label'), str) else criterion,
+                'importance': importance,
+                'weight': weight,
+                'points': points,
+                'max_points': weight,
+                'matched': match_ratio >= 0.99,
+                'match_ratio': round(match_ratio, 3),
+                'reason': reason,
+            }
+        )
+
+    if total_weight == 0:
+        return None, []
+
+    score = int(round((earned_weight / total_weight) * 100))
+    return max(0, min(score, 100)), breakdown
+
+
+def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None) -> dict[str, object]:
+    applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    resume_profile = resume_profile if isinstance(resume_profile, dict) else {}
+    resume_source = resume_profile if resume_profile else resume
+    area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
+    if isinstance(resume_source.get('area'), dict):
+        area = resume_source.get('area')
+    salary = resume_source.get('salary') if isinstance(resume_source.get('salary'), dict) else {}
+    languages = (
+        resume_source.get('language')
+        if isinstance(resume_source.get('language'), list)
+        else resume_source.get('languages')
+        if isinstance(resume_source.get('languages'), list)
+        else []
+    )
+    schedule_names = _extract_names_from_list(resume_source.get('schedules') if isinstance(resume_source.get('schedules'), list) else [])
+    employment_names = _extract_names_from_list(resume_source.get('employments') if isinstance(resume_source.get('employments'), list) else [])
+    language_names = _extract_names_from_list(languages)
+    work_format_names = _extract_names_from_list(
+        resume_source.get('work_format') if isinstance(resume_source.get('work_format'), list) else []
+    )
+    specialization_names = _extract_names_from_list(
+        resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), list) else []
+    )
+    resume_title = resume_source.get('title') if isinstance(resume_source.get('title'), str) else None
+    parsed_experience_months = _extract_candidate_experience_months(resume_source, item)
+    skill_candidates = _extract_names_from_list(
+        resume_source.get('key_skills') if isinstance(resume_source.get('key_skills'), list) else []
+    )
+    if not skill_candidates:
+        skill_candidates = _extract_names_from_list(resume_source.get('skill_set') if isinstance(resume_source.get('skill_set'), list) else [])
+
+    text_blob = ' '.join(
+        value
+        for value in (
+            resume_title,
+            resume_source.get('skills'),
+            resume_source.get('skill_set') if isinstance(resume_source.get('skill_set'), str) else None,
+            resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), str) else None,
+            item.get('cover_letter'),
+            item.get('message'),
+        )
+        if isinstance(value, str) and value.strip()
+    )
+    normalized_blob = _normalize_text(text_blob)
+
+    return {
+        'skills': skill_candidates,
+        'specialization': specialization_names or ([resume_title] if resume_title else []),
+        'location': [area.get('name')] if isinstance(area.get('name'), str) and area.get('name').strip() else [],
+        'salary_from': salary.get('from') if isinstance(salary.get('from'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
+        'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
+        'experience': [value for value in (resume.get('total_experience'), resume.get('experience')) if isinstance(value, str) and value.strip()],
+        'total_experience_months': parsed_experience_months,
+        'work_format': _normalize_work_formats(work_format_names),
+        'employment_type': employment_names,
+        'language': language_names,
+        'formalization': employment_names,
+        'remote_mode': schedule_names,
+        'summary_text': normalized_blob,
+        'all_tokens': sorted(_normalize_tokens([normalized_blob] + schedule_names + employment_names + language_names)),
+    }
+
+
+def _match_criterion(
+    *,
+    criterion: str,
+    compare_mode: str,
+    expected: object,
+    candidate_profile: dict[str, object],
+) -> tuple[float, str]:
+    if compare_mode == 'token_overlap':
+        expected_tokens = _normalize_tokens(_as_string_list(expected))
+        candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get(criterion)))
+        if not expected_tokens:
+            return 0.0, 'Критерий вакансии не заполнен.'
+        if not candidate_tokens:
+            return 0.0, 'Нет данных кандидата для сравнения.'
+        overlap = len(expected_tokens & candidate_tokens)
+        if criterion == 'location':
+            ratio = 1.0 if overlap > 0 else 0.0
+        elif criterion == 'specialization':
+            ratio = 1.0 if overlap > 0 else 0.0
+        elif criterion == 'work_format':
+            ratio = 1.0 if overlap > 0 else 0.0
+        else:
+            ratio = overlap / max(len(expected_tokens), 1)
+        if criterion in {'skills', 'specialization'} and overlap > 0:
+            matched_values = sorted(expected_tokens & candidate_tokens)
+            label = 'Совпали навыки' if criterion == 'skills' else 'Совпала специализация'
+            return ratio, f'{label}: {", ".join(matched_values)}'
+        if criterion == 'work_format':
+            if overlap > 0:
+                matched_values = sorted(expected_tokens & candidate_tokens)
+                return 1.0, f'Совпало: {", ".join(matched_values)}'
+            return 0.0, 'Не совпадает формат работы'
+        return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
+
+    if compare_mode == 'work_format_match':
+        expected_values = set(_normalize_work_formats(_as_string_list(expected)))
+        candidate_values = set(_normalize_work_formats(_as_string_list(candidate_profile.get('work_format'))))
+        if not expected_values:
+            return 0.0, 'Критерий вакансии не заполнен.'
+        if not candidate_values:
+            return 0.0, 'Нет данных кандидата'
+        overlap = expected_values & candidate_values
+        if overlap:
+            matched = ', '.join(_display_work_format(value) for value in sorted(overlap))
+            return 1.0, f'Совпало: {matched}'
+        return 0.0, 'Не совпадает формат работы'
+
+    if compare_mode == 'salary_range' and isinstance(expected, dict):
+        candidate_from = candidate_profile.get('salary_from')
+        if not isinstance(candidate_from, (int, float)):
+            return 0.0, 'У кандидата не указаны зарплатные ожидания.'
+        expected_from = expected.get('from')
+        expected_to = expected.get('to')
+        if isinstance(expected_to, (int, float)) and candidate_from > expected_to:
+            return 0.0, 'Ожидания кандидата выше вилки.'
+        if isinstance(expected_from, (int, float)) and candidate_from < expected_from:
+            return 0.7, 'Ожидания ниже минимальной границы.'
+        return 1.0, 'Зарплатные ожидания попадают в вилку.'
+
+    if compare_mode == 'experience_range' and isinstance(expected, dict):
+        candidate_months = candidate_profile.get('total_experience_months')
+        if not isinstance(candidate_months, int):
+            return 0.0, 'Не удалось определить суммарный опыт кандидата.'
+
+        min_months = expected.get('min_months')
+        max_months = expected.get('max_months')
+        experience_label = expected.get('label') if isinstance(expected.get('label'), str) else '—'
+
+        if isinstance(min_months, int) and candidate_months < min_months:
+            return 0.0, f'Опыт кандидата {candidate_months} мес., требуется от {min_months} мес. ({experience_label}).'
+        if isinstance(max_months, int) and candidate_months > max_months:
+            return 0.7, f'Опыт кандидата {candidate_months} мес., выше диапазона до {max_months} мес. ({experience_label}).'
+        if isinstance(min_months, int) or isinstance(max_months, int):
+            if isinstance(min_months, int) and isinstance(max_months, int):
+                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует {min_months}–{max_months} мес.'
+            if isinstance(min_months, int):
+                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует от {min_months} мес.'
+            return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует до {max_months} мес.'
+
+        candidate_text_tokens = _normalize_tokens(_as_string_list(candidate_profile.get('experience')))
+        expected_tokens = _normalize_tokens([experience_label])
+        if not candidate_text_tokens:
+            return 0.0, 'Нет данных кандидата для сравнения по опыту.'
+        overlap = len(expected_tokens & candidate_text_tokens)
+        ratio = overlap / max(len(expected_tokens), 1)
+        return ratio, f'Сопоставление текстового опыта: {overlap} из {len(expected_tokens)}.'
+
+    if compare_mode == 'text_presence' and isinstance(expected, dict):
+        summary_text = candidate_profile.get('summary_text') if isinstance(candidate_profile.get('summary_text'), str) else ''
+        if not summary_text:
+            return 0.0, 'Нет текстовых данных кандидата для проверки.'
+        matched = 0
+        for _, chunk in expected.items():
+            chunk_tokens = [token for token in _normalize_text(chunk).split() if len(token) >= 4]
+            if chunk_tokens and any(token in summary_text for token in chunk_tokens):
+                matched += 1
+        if not expected:
+            return 0.0, 'Требования не указаны.'
+        return matched / len(expected), f'Совпало {matched} из {len(expected)} текстовых требований.'
+
+    return 0.0, 'Нет логики сравнения для критерия.'
+
+
+def _extract_names_from_list(values: list[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            result.append(value.strip())
+            continue
+        if isinstance(value, dict):
+            name = value.get('name')
+            if isinstance(name, str) and name.strip():
+                result.append(name.strip())
+    return result
+
+
+def _extract_single_name(value: object) -> list[str]:
+    if isinstance(value, dict):
+        name = value.get('name')
+        if isinstance(name, str) and name.strip():
+            return [name.strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        return _extract_names_from_list(value)
+    return []
+
+
+def _has_meaningful_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(_has_meaningful_value(nested) for nested in value.values())
+    if isinstance(value, list):
+        return any(_has_meaningful_value(nested) for nested in value)
+    if isinstance(value, (int, float)):
+        return True
+    return False
+
+
+def _as_string_list(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        result: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                result.append(item)
+        return result
+    if isinstance(value, dict):
+        result: list[str] = []
+        for nested_value in value.values():
+            if isinstance(nested_value, str):
+                result.append(nested_value)
+        return result
+    return []
+
+
+def _normalize_text(value: str) -> str:
+    decoded = unescape(value)
+    no_tags = re.sub(r'<[^>]+>', ' ', decoded)
+    normalized = no_tags.lower().replace('-', ' ').replace('—', ' ').replace('/', ' ')
+    normalized = re.sub(r'[^a-zа-яё0-9+\s]', ' ', normalized)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    return normalized
+
+
+def _extract_candidate_experience_months(resume: dict, item: dict) -> int | None:
+    total_experience = resume.get('total_experience')
+    if isinstance(total_experience, dict):
+        months_value = total_experience.get('months')
+        if isinstance(months_value, int):
+            return max(months_value, 0)
+
+    for source in (
+        total_experience if isinstance(total_experience, str) else None,
+        resume.get('experience') if isinstance(resume.get('experience'), str) else None,
+        item.get('experience') if isinstance(item.get('experience'), str) else None,
+    ):
+        if isinstance(source, str):
+            parsed = _parse_experience_months_from_text(source)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+async def _fetch_resumes_profiles(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    items: list[dict],
+) -> dict[str, dict]:
+    resume_ids: set[str] = set()
+    for item in items:
+        resume_id = _extract_resume_id(item)
+        if resume_id:
+            resume_ids.add(resume_id)
+
+    profiles: dict[str, dict] = {}
+    for resume_id in resume_ids:
+        payload = await _hh_get(client, f'/resumes/{resume_id}', access_token=access_token, allow_404=True)
+        if payload.get('_status_code') == 404:
+            continue
+        profiles[resume_id] = payload
+    return profiles
+
+
+def _extract_resume_id(item: dict) -> str | None:
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    direct_id = resume.get('id')
+    if isinstance(direct_id, str) and direct_id.strip():
+        return direct_id.strip()
+
+    for key in ('url', 'alternate_url'):
+        url_value = resume.get(key)
+        if not isinstance(url_value, str) or not url_value:
+            continue
+        parsed = urlparse(url_value)
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if 'resumes' in path_parts:
+            idx = path_parts.index('resumes')
+            if idx + 1 < len(path_parts):
+                return unquote(path_parts[idx + 1])
+    return None
+
+
+def _parse_experience_months_from_text(value: str) -> int | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+
+    years_match = re.search(r'(\d+)\s*(год|года|лет)', normalized)
+    months_match = re.search(r'(\d+)\s*(месяц|месяца|месяцев|мес)', normalized)
+    years = int(years_match.group(1)) if years_match else 0
+    months = int(months_match.group(1)) if months_match else 0
+    total = years * 12 + months
+    if total > 0:
+        return total
+
+    plain_number_match = re.search(r'(\d+)', normalized)
+    if plain_number_match:
+        return int(plain_number_match.group(1)) * 12
+    return None
+
+
+def _parse_experience_range_months(label: str) -> tuple[int | None, int | None]:
+    normalized = _normalize_text(label)
+    if not normalized:
+        return None, None
+
+    numbers = [int(match) for match in re.findall(r'\d+', normalized)]
+    if '+' in normalized and numbers:
+        return numbers[0] * 12, None
+    if len(numbers) >= 2:
+        first, second = numbers[0], numbers[1]
+        return min(first, second) * 12, max(first, second) * 12
+    if len(numbers) == 1:
+        value = numbers[0] * 12
+        if 'до' in normalized:
+            return None, value
+        return value, None
+
+    mapping = {
+        'нет опыта': (0, 12),
+        'от 1 года до 3 лет': (12, 36),
+        'от 3 до 6 лет': (36, 72),
+        'более 6 лет': (72, None),
+    }
+    for key, range_value in mapping.items():
+        if key in normalized:
+            return range_value
+
+    return None, None
+
+
+def _normalize_work_formats(values: list[str]) -> list[str]:
+    normalized_values: list[str] = []
+    for value in values:
+        normalized = _normalize_work_format_value(value)
+        if normalized and normalized not in normalized_values:
+            normalized_values.append(normalized)
+    return normalized_values
+
+
+def _normalize_work_format_value(value: str) -> str | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+
+    mapping = {
+        'remote': 'remote',
+        'удаленно': 'remote',
+        'удалённо': 'remote',
+        'office': 'office',
+        'on site': 'office',
+        'on_site': 'office',
+        'на месте работодателя': 'office',
+        'hybrid': 'hybrid',
+        'гибрид': 'hybrid',
+    }
+
+    if normalized in mapping:
+        return mapping[normalized]
+    if normalized.upper() in {'REMOTE', 'OFFICE', 'HYBRID'}:
+        return normalized.lower()
+    return None
+
+
+def _display_work_format(value: str) -> str:
+    return {
+        'remote': 'удалённо',
+        'office': 'офис',
+        'hybrid': 'гибрид',
+    }.get(value, value)
+
+
+def _normalize_tokens(values: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if normalized:
+            tokens.add(normalized)
+    return tokens
+
+
+def _response_sort_key(item: dict[str, object | None]) -> tuple[int, int, str]:
+    score_raw = item.get('score')
+    score = score_raw if isinstance(score_raw, int) else -1
+    has_score = 1 if isinstance(score_raw, int) else 0
+    created_at = item.get('response_created_at')
+    created_at_key = created_at if isinstance(created_at, str) else ''
+    return has_score, score, created_at_key
 
 
 def _extract_candidate_name(item: dict, applicant: dict, candidate: dict, resume: dict) -> str | None:
