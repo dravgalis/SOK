@@ -453,7 +453,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         raw_items.append(item)
 
     fallback_fetches: list[dict[str, object]] = []
-    primary_total_for_gap = summary_total if summary_total > 0 else total_from_vacancy
+    primary_total_for_gap = total_from_vacancy
     primary_source_items = [item for item in raw_items if _is_real_response_item(item)]
     primary_missing = max(primary_total_for_gap - len(primary_source_items), 0)
     if primary_missing > 0:
