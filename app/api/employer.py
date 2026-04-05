@@ -199,6 +199,8 @@ async def get_vacancy_responses(
         'any_status_total_raw': responses_payload['any_status_total_raw'],
         'vacancy_vs_any_gap': responses_payload['vacancy_vs_any_gap'],
         'visibility_gap_note': responses_payload['visibility_gap_note'],
+        'can_fetch_all_detailed_items': responses_payload['can_fetch_all_detailed_items'],
+        'api_limitation_states': responses_payload['api_limitation_states'],
         'full_export': all,
     }
 
@@ -381,6 +383,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         seed_payload=payload,
     )
     summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
+    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
     pages_loaded = 0
     hh_total_raw = _extract_hh_total_raw(payload)
@@ -391,11 +394,13 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     duplicates_skipped_total = 0
 
     for state in states_processed:
+        expected_count_hint = summary_counts_raw_for_fetch.get(state)
         state_items, state_pages, state_total, page_counts, state_raw_ids = await _fetch_negotiations_pages(
             client,
             access_token=access_token,
             vacancy_id=vacancy_id,
             state=state,
+            expected_count_hint=expected_count_hint if isinstance(expected_count_hint, int) else None,
         )
         pages_loaded += state_pages
         if isinstance(state_total, int):
@@ -466,6 +471,7 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         fetched_counts_map=fetched_counts_map,
         summary_names_map=summary_names_map,
         state_names=state_names,
+        state_fetch_diagnostics=state_fetch_diagnostics,
     )
     missing_by_state = [row for row in state_diagnostics if row.get('missing_count', 0) > 0]
     fetched_by_state = [
@@ -489,13 +495,21 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     vacancy_vs_any_gap = max(total_from_vacancy - any_status_total_raw, 0)
     visibility_restricted_states = [row for row in missing_by_state if row.get('missing_count', 0) > 0]
     visibility_gap_note = None
+    api_limitation_states = [
+        row for row in state_diagnostics
+        if row.get('hh_state_total_raw') is not None
+        and isinstance(row.get('expected_count'), int)
+        and isinstance(row.get('hh_state_total_raw'), int)
+        and row['hh_state_total_raw'] < row['expected_count']
+    ]
     if missing_items_count > 0:
         visibility_gap_note = (
             'Summary/vacancy counters include responses that are not returned by detailed negotiations endpoints. '
             'Likely reasons: permissions, archived/hidden negotiations, or HH API visibility rules. '
             f'vacancy_total={total_from_vacancy}, any_status_total={any_status_total_raw}, '
             f'detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}, '
-            f'missing_states={len(visibility_restricted_states)}.'
+            f'missing_states={len(visibility_restricted_states)}, '
+            f'api_limitation_states={len(api_limitation_states)}.'
         )
 
     return {
@@ -525,6 +539,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         'any_status_total_raw': any_status_total_raw,
         'vacancy_vs_any_gap': vacancy_vs_any_gap,
         'visibility_gap_note': visibility_gap_note,
+        'can_fetch_all_detailed_items': missing_items_count == 0,
+        'api_limitation_states': api_limitation_states,
     }
 
 
@@ -583,12 +599,41 @@ def _build_state_diagnostics(
     fetched_counts_map: dict[str, int],
     summary_names_map: dict[str, str],
     state_names: dict[str, str],
+    state_fetch_diagnostics: list[dict[str, object]],
 ) -> list[dict[str, object]]:
+    fetch_by_logical_state: dict[str, dict[str, object]] = {}
+    for row in state_fetch_diagnostics:
+        state = row.get('state')
+        if not isinstance(state, str) or not state:
+            continue
+        logical_state = _normalize_state_alias(state)
+        existing = fetch_by_logical_state.get(logical_state)
+        state_total_raw = row.get('state_total_raw')
+        state_total_raw_value = state_total_raw if isinstance(state_total_raw, int) else None
+        fetched_raw_count = row.get('fetched_raw_count')
+        fetched_raw_count_value = fetched_raw_count if isinstance(fetched_raw_count, int) else 0
+        if existing is None:
+            fetch_by_logical_state[logical_state] = {
+                'state_total_raw': state_total_raw_value,
+                'fetched_raw_count': fetched_raw_count_value,
+            }
+            continue
+        existing_total = existing.get('state_total_raw')
+        if isinstance(existing_total, int) and isinstance(state_total_raw_value, int):
+            existing['state_total_raw'] = max(existing_total, state_total_raw_value)
+        elif isinstance(state_total_raw_value, int):
+            existing['state_total_raw'] = state_total_raw_value
+        existing['fetched_raw_count'] = max(int(existing.get('fetched_raw_count', 0)), fetched_raw_count_value)
+
     diagnostics: list[dict[str, object]] = []
     all_states = sorted(set(summary_counts_map) | set(fetched_counts_map))
     for state in all_states:
         expected_count = summary_counts_map.get(state, 0)
         fetched_count = fetched_counts_map.get(state, 0)
+        state_fetch = fetch_by_logical_state.get(state, {})
+        hh_state_total_raw = state_fetch.get('state_total_raw')
+        fetched_raw_count = state_fetch.get('fetched_raw_count', 0)
+        api_limitation_suspected = isinstance(hh_state_total_raw, int) and hh_state_total_raw < expected_count
         diagnostics.append(
             {
                 'state': state,
@@ -596,6 +641,9 @@ def _build_state_diagnostics(
                 'expected_count': expected_count,
                 'fetched_count': fetched_count,
                 'missing_count': max(expected_count - fetched_count, 0),
+                'fetched_raw_count': fetched_raw_count,
+                'hh_state_total_raw': hh_state_total_raw if isinstance(hh_state_total_raw, int) else None,
+                'api_limitation_suspected': api_limitation_suspected,
             }
         )
     return diagnostics
@@ -736,6 +784,7 @@ async def _fetch_negotiations_pages(
     access_token: str,
     vacancy_id: str,
     state: str,
+    expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
     page = 0
     per_page = 50
@@ -773,10 +822,20 @@ async def _fetch_negotiations_pages(
                 raw_ids.append(_extract_response_dedupe_key(item))
 
         pages = payload.get('pages')
-        if not isinstance(pages, int):
-            break
+        total_hint = raw_total if isinstance(raw_total, int) and raw_total > 0 else None
+        pages_by_total = ((total_hint + per_page - 1) // per_page) if total_hint else None
+        pages_by_expected = ((expected_count_hint + per_page - 1) // per_page) if isinstance(expected_count_hint, int) and expected_count_hint > 0 else None
+        pages_hint = pages if isinstance(pages, int) and pages > 0 else None
+        max_pages_hint = max(
+            value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
+        ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else None
+
         page += 1
-        if page >= pages:
+        if max_pages_hint is not None and page >= max_pages_hint:
+            break
+        if not page_items:
+            break
+        if page >= 200:
             break
 
     return items, pages_loaded, raw_total, page_counts, raw_ids
