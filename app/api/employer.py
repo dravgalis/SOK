@@ -149,20 +149,28 @@ async def get_vacancy_responses(
 ) -> dict[str, object]:
     access_token = _require_access_token(request)
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception('Unexpected error while loading vacancy responses: vacancy_id=%s', vacancy_id)
+        raise HTTPException(status_code=502, detail='Failed to load vacancy responses from HH API.') from exc
 
-    all_items = responses_payload['items'] if isinstance(responses_payload['items'], list) else []
-    detailed_items_count = responses_payload['detailed_items_count'] if isinstance(responses_payload['detailed_items_count'], int) else len(all_items)
+    all_items = responses_payload.get('items')
+    if not isinstance(all_items, list):
+        all_items = []
+    total = len(all_items)
 
     if all:
         resolved_page = 1
-        effective_per_page = detailed_items_count if detailed_items_count > 0 else per_page
+        effective_per_page = total if total > 0 else per_page
         pages = 1
         paginated_items = all_items
     else:
         effective_per_page = per_page
-        pages = max((detailed_items_count + per_page - 1) // per_page, 1)
+        pages = max((total + per_page - 1) // per_page, 1)
         resolved_page = min(page, pages)
         start_index = (resolved_page - 1) * per_page
         end_index = start_index + per_page
@@ -171,37 +179,13 @@ async def get_vacancy_responses(
     return {
         'vacancy_id': vacancy_id,
         'items': paginated_items,
-        'summary_by_state': responses_payload['summary_by_state'],
-        'summary_total': responses_payload['summary_total'],
-        'summary_total_raw': responses_payload['summary_total_raw'],
-        'state_alias_groups': responses_payload['state_alias_groups'],
-        'fetched_by_state': responses_payload['fetched_by_state'],
-        'missing_by_state': responses_payload['missing_by_state'],
-        'missing_items_count': responses_payload['missing_items_count'],
-        'state_diagnostics': responses_payload['state_diagnostics'],
-        'state_fetch_diagnostics': responses_payload['state_fetch_diagnostics'],
-        'collection_diagnostics': responses_payload['collection_diagnostics'],
-        'total': responses_payload['count'],
-        'count': responses_payload['count'],
+        'total': total,
+        'count': total,
         'page': resolved_page,
         'per_page': effective_per_page,
         'pages': pages,
-        'total_from_vacancy': responses_payload['total_from_vacancy'],
-        'hh_total_raw': responses_payload['hh_total_raw'],
-        'detailed_items_count': detailed_items_count,
-        'pages_loaded': responses_payload['pages_loaded'],
-        'items_before_filtering': responses_payload['items_before_filtering'],
-        'items_after_filtering': responses_payload['items_after_filtering'],
-        'states_processed': responses_payload['states_processed'],
-        'collections_urls_processed': responses_payload['collections_urls_processed'],
-        'collections_pages_loaded': responses_payload['collections_pages_loaded'],
-        'collections_errors': responses_payload['collections_errors'],
-        'any_status_total_raw': responses_payload['any_status_total_raw'],
-        'vacancy_vs_any_gap': responses_payload['vacancy_vs_any_gap'],
-        'visibility_gap_note': responses_payload['visibility_gap_note'],
-        'can_fetch_all_detailed_items': responses_payload['can_fetch_all_detailed_items'],
-        'api_limitation_states': responses_payload['api_limitation_states'],
-        'fallback_fetches': responses_payload['fallback_fetches'],
+        'summary_total_raw': responses_payload.get('summary_total_raw', 0),
+        'state_alias_groups': responses_payload.get('state_alias_groups', []),
         'full_export': all,
     }
 
@@ -224,11 +208,14 @@ async def _hh_get(
     url = f'{HH_API_BASE}{path}'
     logger.info('HH request debug: url=%s params=%s', url, params)
 
-    response = await client.get(
-        url,
-        headers={'Authorization': f'Bearer {access_token}'},
-        params=params,
-    )
+    try:
+        response = await client.get(
+            url,
+            headers={'Authorization': f'Bearer {access_token}'},
+            params=params,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f'HH API request failed on {path}.') from exc
 
     logger.info('HH response debug: url=%s status_code=%s', url, response.status_code)
 
@@ -243,7 +230,11 @@ async def _hh_get(
     except httpx.HTTPStatusError as exc:
         raise HTTPException(status_code=502, detail=f'HH API error on {path}: {response.text}') from exc
 
-    payload = response.json()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f'HH API returned invalid JSON for {path}.') from exc
+
     if not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail=f'HH API returned non-object payload for {path}.')
 
@@ -330,245 +321,44 @@ async def _fetch_paginated_vacancies(
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
-    vacancy_payload = await _hh_get(
-        client,
-        f'/vacancies/{vacancy_id}',
-        access_token=access_token,
-        allow_404=True,
-    )
-    total_from_vacancy = _extract_responses_count(vacancy_payload) if vacancy_payload.get('_status_code') != 404 else 0
-
-    payload = await _hh_get(
-        client,
-        '/negotiations',
-        access_token=access_token,
-        params={
-            'vacancy_id': vacancy_id,
-            'status': 'any',
-            'page': '0',
-            'per_page': '50',
-        },
-        allow_404=True,
-    )
-
-    if payload.get('_status_code') == 404:
-        return {
-            'items': [],
-            'summary_by_state': [],
-            'summary_total': 0,
-            'summary_total_raw': 0,
-            'state_alias_groups': [],
-            'fetched_by_state': [],
-            'missing_by_state': [],
-            'missing_items_count': 0,
-            'state_diagnostics': [],
-            'state_fetch_diagnostics': [],
-            'collection_diagnostics': [],
-            'count': 0,
-            'total_from_vacancy': total_from_vacancy,
-            'hh_total_raw': 0,
-            'pages_loaded': 0,
-            'items_before_filtering': 0,
-            'items_after_filtering': 0,
-            'states_processed': [],
-            'collections_urls_processed': 0,
-            'collections_pages_loaded': 0,
-            'collections_errors': [],
-            'any_status_total_raw': 0,
-            'vacancy_vs_any_gap': max(total_from_vacancy, 0),
-            'visibility_gap_note': None,
-            'can_fetch_all_detailed_items': True,
-            'api_limitation_states': [],
-            'fallback_fetches': [],
-        }
-
-    raw_items, pages_loaded, hh_total_raw, page_counts, _ = await _fetch_negotiations_by_params(
+    raw_items, _, _, _, _ = await _fetch_negotiations_by_params(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
         params={'status': 'any'},
-        expected_count_hint=total_from_vacancy,
     )
-    summary_by_state = _extract_summary_by_state(payload, state_names=state_names)
-    summary_counts_raw_for_fetch, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
 
-    deduped_items: list[dict] = []
-    dedupe_keys: set[str] = set()
-    duplicates_skipped_total = 0
+    unique_items: list[dict[str, object | None]] = []
+    seen_response_ids: set[str] = set()
+    raw_items_without_id = 0
+    duplicate_items = 0
 
-    for state in states_processed:
-        expected_count_hint = summary_counts_raw_for_fetch.get(state)
-        state_items, state_pages, state_total, page_counts, state_raw_ids = await _fetch_negotiations_pages(
-            client,
-            access_token=access_token,
-            vacancy_id=vacancy_id,
-            state=state,
-            expected_count_hint=expected_count_hint if isinstance(expected_count_hint, int) else None,
-        )
-        pages_loaded += state_pages
-        if isinstance(state_total, int):
-            hh_total_raw = max(hh_total_raw, state_total)
-
-        state_added = 0
-        state_duplicates = 0
-        duplicate_ids: list[str] = []
-        for item in state_items:
-            dedupe_key = _extract_response_dedupe_key(item)
-            if dedupe_key in dedupe_keys:
-                state_duplicates += 1
-                duplicate_ids.append(dedupe_key)
-                continue
-            dedupe_keys.add(dedupe_key)
-            raw_items.append(item)
-            state_added += 1
-
-        duplicates_skipped_total += state_duplicates
-        logical_state = _normalize_state_alias(state)
-        state_fetch_diagnostics.append(
-            {
-                'state': state,
-                'logical_state': logical_state,
-                'pages_loaded': state_pages,
-                'page_counts': page_counts,
-                'fetched_raw_count': len(state_items),
-                'raw_ids': state_raw_ids,
-                'raw_ids_before_dedupe': len(state_raw_ids),
-                'added_after_dedupe': state_added,
-                'duplicates_skipped': state_duplicates,
-                'duplicate_ids': duplicate_ids,
-                'state_total_raw': state_total,
-            }
-        )
-
-    followup_items, followup_debug = await _fetch_followup_negotiations_from_collections(
-        client,
-        access_token=access_token,
-        vacancy_id=vacancy_id,
-        payload=payload,
-    )
-    for item in followup_items:
-        dedupe_key = _extract_response_dedupe_key(item)
-        if dedupe_key in dedupe_keys:
-            duplicates_skipped_total += 1
+    for item in raw_items:
+        normalized_item = _normalize_response(item)
+        response_id = normalized_item.get('response_id')
+        if not isinstance(response_id, str) or not response_id:
+            raw_items_without_id += 1
             continue
-        dedupe_keys.add(dedupe_key)
-        deduped_items.append(item)
+        if response_id in seen_response_ids:
+            duplicate_items += 1
+            continue
+        seen_response_ids.add(response_id)
+        unique_items.append(normalized_item)
 
-    fallback_fetches: list[dict[str, object]] = []
-    primary_total_for_gap = total_from_vacancy
-    primary_source_items = [item for item in raw_items if _is_real_response_item(item)]
-    primary_missing = max(primary_total_for_gap - len(primary_source_items), 0)
-    if primary_missing > 0:
-        fallback_items, fallback_info = await _fetch_missing_negotiations_fallback(
-            client,
-            access_token=access_token,
-            vacancy_id=vacancy_id,
-            expected_total=primary_total_for_gap,
-            existing_items=raw_items,
-            existing_dedupe_keys=dedupe_keys,
-        )
-        raw_items.extend(fallback_items)
-        fallback_fetches = fallback_info
-
-    items_before_filtering = len(deduped_items)
-    source_items = [item for item in deduped_items if _is_real_response_item(item)]
-    items_after_filtering = len(source_items)
-
-    fetched_counts_map = _count_items_by_state(source_items)
-    summary_counts_map, summary_names_map = _aggregate_summary_by_state(summary_by_state)
-    summary_counts_raw_map, _ = _aggregate_summary_by_state(summary_by_state, normalize_aliases=False)
-    summary_total = sum(summary_counts_map.values())
-    summary_total_raw = sum(summary_counts_raw_map.values())
-    alias_groups = _build_state_alias_groups(
-        summary_counts_raw_map=summary_counts_raw_map,
-        summary_names_map=summary_names_map,
-        fetched_counts_map=fetched_counts_map,
+    logger.info(
+        'HH responses debug: vacancy_id=%s raw_items=%s unique_items=%s duplicates=%s missing_response_id=%s sample_ids=%s',
+        vacancy_id,
+        len(raw_items),
+        len(unique_items),
+        duplicate_items,
+        raw_items_without_id,
+        list(seen_response_ids)[:10],
     )
-
-    state_diagnostics = _build_state_diagnostics(
-        summary_counts_map=summary_counts_map,
-        fetched_counts_map=fetched_counts_map,
-        summary_names_map=summary_names_map,
-        state_names=state_names,
-        state_fetch_diagnostics=state_fetch_diagnostics,
-    )
-    missing_by_state = [row for row in state_diagnostics if row.get('missing_count', 0) > 0]
-    fetched_by_state = [
-        {
-            'state': state,
-            'state_name': summary_names_map.get(state) or state_names.get(state) or state,
-            'count': count,
-        }
-        for state, count in sorted(fetched_counts_map.items(), key=lambda item: item[0])
-    ]
-    collection_diagnostics = _enrich_collection_diagnostics(
-        raw_collection_diagnostics=followup_debug['collection_diagnostics'],
-        summary_counts_map=summary_counts_map,
-        fetched_counts_map=fetched_counts_map,
-    )
-
-    normalized_items = [_normalize_response(item) for item in source_items]
-    total_count = len(normalized_items)
-    missing_items_count = max(total_from_vacancy - total_count, 0)
-
-    visibility_gap_note = None
-    api_limitation_states = [
-        row for row in state_diagnostics
-        if row.get('hh_state_total_raw') is not None
-        and isinstance(row.get('expected_count'), int)
-        and isinstance(row.get('hh_state_total_raw'), int)
-        and row['hh_state_total_raw'] < row['expected_count']
-    ]
-    if missing_items_count > 0:
-        visibility_gap_note = (
-            'Summary/vacancy counters include responses that are not returned by detailed negotiations endpoints. '
-            'Likely reasons: permissions, archived/hidden negotiations, or HH API visibility rules. '
-            f'vacancy_total={total_from_vacancy}, any_status_total={any_status_total_raw}, '
-            f'detailed_items_count={total_count}, duplicates_skipped={duplicates_skipped_total}, '
-            f'missing_states={len(visibility_restricted_states)}, '
-            f'api_limitation_states={len(api_limitation_states)}.'
-        )
 
     return {
-        'items': normalized_items,
-        'summary_by_state': summary_by_state,
-        'summary_total': summary_total,
-        'summary_total_raw': summary_total_raw,
-        'state_alias_groups': alias_groups,
-        'fetched_by_state': fetched_by_state,
-        'missing_by_state': missing_by_state,
-        'missing_items_count': missing_items_count,
-        'state_diagnostics': [],
-        'state_fetch_diagnostics': [
-            {
-                'state': 'any',
-                'pages_loaded': pages_loaded,
-                'page_counts': page_counts,
-                'fetched_raw_count': len(raw_items),
-                'added_after_dedupe': len(deduped_items),
-                'duplicates_skipped': duplicates_skipped_total,
-                'state_total_raw': hh_total_raw,
-            }
-        ],
-        'collection_diagnostics': [],
-        'count': total_count,
-        'detailed_items_count': total_count,
-        'total_from_vacancy': total_from_vacancy,
-        'hh_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
-        'pages_loaded': pages_loaded,
-        'items_before_filtering': items_before_filtering,
-        'items_after_filtering': items_after_filtering,
-        'states_processed': ['any'],
-        'summary_total_hint': 0,
-        'collections_urls_processed': 0,
-        'collections_pages_loaded': 0,
-        'collections_errors': [],
-        'any_status_total_raw': hh_total_raw if isinstance(hh_total_raw, int) else 0,
-        'vacancy_vs_any_gap': max(total_from_vacancy - (hh_total_raw if isinstance(hh_total_raw, int) else 0), 0),
-        'visibility_gap_note': visibility_gap_note,
-        'can_fetch_all_detailed_items': missing_items_count == 0,
-        'api_limitation_states': api_limitation_states,
-        'fallback_fetches': fallback_fetches,
+        'items': unique_items,
+        'summary_total_raw': 0,
+        'state_alias_groups': [],
     }
 
 
@@ -894,19 +684,21 @@ async def _fetch_negotiations_by_params(
     raw_ids: list[str] = []
 
     while True:
+        request_params = {
+            'vacancy_id': vacancy_id,
+            **params,
+            'page': str(page),
+            'per_page': str(per_page),
+        }
         payload = await _hh_get(
             client,
             '/negotiations',
             access_token=access_token,
-            params={
-                'vacancy_id': vacancy_id,
-                **params,
-                'page': str(page),
-                'per_page': str(per_page),
-            },
+            params=request_params,
             allow_404=True,
         )
         if payload.get('_status_code') == 404:
+            logger.info('HH negotiations debug: vacancy_id=%s params=%s status=404', vacancy_id, request_params)
             break
 
         pages_loaded += 1
@@ -930,6 +722,14 @@ async def _fetch_negotiations_by_params(
         ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else None
 
         page += 1
+        logger.info(
+            'HH negotiations debug: vacancy_id=%s params=%s page_items=%s pages_loaded=%s raw_total=%s',
+            vacancy_id,
+            request_params,
+            len(page_items) if isinstance(page_items, list) else 0,
+            pages_loaded,
+            raw_total,
+        )
         if max_pages_hint is not None and page >= max_pages_hint:
             break
         if not page_items:
@@ -1242,6 +1042,10 @@ def _build_state_alias_groups(
 
 
 def _extract_response_dedupe_key(item: dict) -> str:
+    response_id = _extract_response_id(item)
+    if response_id:
+        return f'response_id:{response_id}'
+
     for key in ('id', 'response_id', 'negotiation_id'):
         value = item.get(key)
         if value is not None:
@@ -1258,6 +1062,26 @@ def _extract_response_dedupe_key(item: dict) -> str:
                 return f'topic_id:{raw}'
 
     return f'fallback:{id(item)}'
+
+
+def _extract_response_id(item: dict) -> str | None:
+    for key in ('id', 'response_id', 'negotiation_id'):
+        value = item.get(key)
+        if value is None:
+            continue
+        raw = str(value).strip()
+        if raw:
+            return raw
+
+    topic = item.get('topic')
+    if isinstance(topic, dict):
+        topic_id = topic.get('id')
+        if topic_id is not None:
+            raw = str(topic_id).strip()
+            if raw:
+                return raw
+
+    return None
 
 
 def _is_real_response_item(item: object) -> bool:
@@ -1399,7 +1223,7 @@ def _normalize_response(item: dict) -> dict[str, object | None]:
     )
 
     return {
-        'response_id': str(item.get('id', '')),
+        'response_id': _extract_response_id(item) or '',
         'candidate_name': _extract_candidate_name(item, applicant, candidate, resume),
         'resume_title': resume.get('title') if isinstance(resume.get('title'), str) else None,
         'age': age,
