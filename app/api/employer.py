@@ -4,6 +4,7 @@ import logging
 import re
 from html import unescape
 from urllib.parse import urlparse
+from urllib.parse import unquote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -380,12 +381,16 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     seen_response_ids: set[str] = set()
     raw_items_without_id = 0
     duplicate_items = 0
+    resumes_profiles = await _fetch_resumes_profiles(client, access_token=access_token, items=merged_raw_items)
 
     for item in merged_raw_items:
+        resume_id = _extract_resume_id(item)
+        resume_profile = resumes_profiles.get(resume_id) if resume_id else None
         normalized_item = _normalize_response(item)
         score, score_breakdown = _score_candidate_against_vacancy(
             vacancy_criteria=vacancy_criteria,
             response_item=item,
+            resume_profile=resume_profile if isinstance(resume_profile, dict) else None,
         )
         normalized_item['score'] = score
         normalized_item['score_breakdown'] = score_breakdown
@@ -1506,6 +1511,7 @@ def _score_candidate_against_vacancy(
     *,
     vacancy_criteria: dict[str, dict[str, object]],
     response_item: dict,
+    resume_profile: dict | None = None,
 ) -> tuple[int | None, list[dict[str, object]]]:
     if not vacancy_criteria:
         return None, []
@@ -1525,7 +1531,7 @@ def _score_candidate_against_vacancy(
         'additional_requirements': 14,
     }
 
-    candidate_profile = _extract_candidate_profile(response_item)
+    candidate_profile = _extract_candidate_profile(response_item, resume_profile=resume_profile)
     breakdown: list[dict[str, object]] = []
     total_weight = 0
     earned_weight = 0.0
@@ -1572,30 +1578,43 @@ def _score_candidate_against_vacancy(
     return max(0, min(score, 100)), breakdown
 
 
-def _extract_candidate_profile(item: dict) -> dict[str, object]:
+def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None) -> dict[str, object]:
     applicant = item.get('applicant') if isinstance(item.get('applicant'), dict) else {}
     resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    resume_profile = resume_profile if isinstance(resume_profile, dict) else {}
+    resume_source = resume_profile if resume_profile else resume
     area = resume.get('area') if isinstance(resume.get('area'), dict) else applicant.get('area') if isinstance(applicant.get('area'), dict) else {}
-    salary = resume.get('salary') if isinstance(resume.get('salary'), dict) else {}
-    languages = resume.get('language') if isinstance(resume.get('language'), list) else resume.get('languages') if isinstance(resume.get('languages'), list) else []
-    schedule_names = _extract_names_from_list(resume.get('schedules') if isinstance(resume.get('schedules'), list) else [])
-    employment_names = _extract_names_from_list(resume.get('employments') if isinstance(resume.get('employments'), list) else [])
+    if isinstance(resume_source.get('area'), dict):
+        area = resume_source.get('area')
+    salary = resume_source.get('salary') if isinstance(resume_source.get('salary'), dict) else {}
+    languages = (
+        resume_source.get('language')
+        if isinstance(resume_source.get('language'), list)
+        else resume_source.get('languages')
+        if isinstance(resume_source.get('languages'), list)
+        else []
+    )
+    schedule_names = _extract_names_from_list(resume_source.get('schedules') if isinstance(resume_source.get('schedules'), list) else [])
+    employment_names = _extract_names_from_list(resume_source.get('employments') if isinstance(resume_source.get('employments'), list) else [])
     language_names = _extract_names_from_list(languages)
-    specialization_names = _extract_names_from_list(resume.get('professional_roles') if isinstance(resume.get('professional_roles'), list) else [])
-    resume_title = resume.get('title') if isinstance(resume.get('title'), str) else None
-    parsed_experience_months = _extract_candidate_experience_months(resume, item)
-    skill_candidates = _extract_names_from_list(resume.get('skill_set') if isinstance(resume.get('skill_set'), list) else [])
-    if resume_title and resume_title.strip():
-        skill_candidates.append(resume_title.strip())
-    skill_candidates.extend(specialization_names)
+    specialization_names = _extract_names_from_list(
+        resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), list) else []
+    )
+    resume_title = resume_source.get('title') if isinstance(resume_source.get('title'), str) else None
+    parsed_experience_months = _extract_candidate_experience_months(resume_source, item)
+    skill_candidates = _extract_names_from_list(
+        resume_source.get('key_skills') if isinstance(resume_source.get('key_skills'), list) else []
+    )
+    if not skill_candidates:
+        skill_candidates = _extract_names_from_list(resume_source.get('skill_set') if isinstance(resume_source.get('skill_set'), list) else [])
 
     text_blob = ' '.join(
         value
         for value in (
             resume_title,
-            resume.get('skills'),
-            resume.get('skill_set') if isinstance(resume.get('skill_set'), str) else None,
-            resume.get('professional_roles') if isinstance(resume.get('professional_roles'), str) else None,
+            resume_source.get('skills'),
+            resume_source.get('skill_set') if isinstance(resume_source.get('skill_set'), str) else None,
+            resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), str) else None,
             item.get('cover_letter'),
             item.get('message'),
         )
@@ -1639,8 +1658,14 @@ def _match_criterion(
         overlap = len(expected_tokens & candidate_tokens)
         if criterion == 'location':
             ratio = 1.0 if overlap > 0 else 0.0
+        elif criterion == 'specialization':
+            ratio = 1.0 if overlap > 0 else 0.0
         else:
             ratio = overlap / max(len(expected_tokens), 1)
+        if criterion in {'skills', 'specialization'} and overlap > 0:
+            matched_values = sorted(expected_tokens & candidate_tokens)
+            label = 'Совпали навыки' if criterion == 'skills' else 'Совпала специализация'
+            return ratio, f'{label}: {", ".join(matched_values)}'
         return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
 
     if compare_mode == 'salary_range' and isinstance(expected, dict):
@@ -1781,6 +1806,46 @@ def _extract_candidate_experience_months(resume: dict, item: dict) -> int | None
             parsed = _parse_experience_months_from_text(source)
             if parsed is not None:
                 return parsed
+    return None
+
+
+async def _fetch_resumes_profiles(
+    client: httpx.AsyncClient,
+    *,
+    access_token: str,
+    items: list[dict],
+) -> dict[str, dict]:
+    resume_ids: set[str] = set()
+    for item in items:
+        resume_id = _extract_resume_id(item)
+        if resume_id:
+            resume_ids.add(resume_id)
+
+    profiles: dict[str, dict] = {}
+    for resume_id in resume_ids:
+        payload = await _hh_get(client, f'/resumes/{resume_id}', access_token=access_token, allow_404=True)
+        if payload.get('_status_code') == 404:
+            continue
+        profiles[resume_id] = payload
+    return profiles
+
+
+def _extract_resume_id(item: dict) -> str | None:
+    resume = item.get('resume') if isinstance(item.get('resume'), dict) else {}
+    direct_id = resume.get('id')
+    if isinstance(direct_id, str) and direct_id.strip():
+        return direct_id.strip()
+
+    for key in ('url', 'alternate_url'):
+        url_value = resume.get(key)
+        if not isinstance(url_value, str) or not url_value:
+            continue
+        parsed = urlparse(url_value)
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if 'resumes' in path_parts:
+            idx = path_parts.index('resumes')
+            if idx + 1 < len(path_parts):
+                return unquote(path_parts[idx + 1])
     return None
 
 
