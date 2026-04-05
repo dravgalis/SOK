@@ -1433,8 +1433,8 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
         )
     add_criterion(
         criterion_id='work_format',
-        expected=_extract_names_from_list(vacancy_payload.get('work_format') if isinstance(vacancy_payload.get('work_format'), list) else []),
-        compare_mode='token_overlap',
+        expected=_normalize_work_formats(_extract_names_from_list(vacancy_payload.get('work_format') if isinstance(vacancy_payload.get('work_format'), list) else [])),
+        compare_mode='work_format_match',
         importance='preferred',
         label='Формат работы',
     )
@@ -1624,7 +1624,7 @@ def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None
         'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
         'experience': [value for value in (resume.get('total_experience'), resume.get('experience')) if isinstance(value, str) and value.strip()],
         'total_experience_months': parsed_experience_months,
-        'work_format': work_format_names,
+        'work_format': _normalize_work_formats(work_format_names),
         'employment_type': employment_names,
         'language': language_names,
         'formalization': employment_names,
@@ -1667,6 +1667,19 @@ def _match_criterion(
                 return 1.0, f'Совпало: {", ".join(matched_values)}'
             return 0.0, 'Не совпадает формат работы'
         return ratio, f'Совпало {overlap} из {len(expected_tokens)}.'
+
+    if compare_mode == 'work_format_match':
+        expected_values = set(_normalize_work_formats(_as_string_list(expected)))
+        candidate_values = set(_normalize_work_formats(_as_string_list(candidate_profile.get('work_format'))))
+        if not expected_values:
+            return 0.0, 'Критерий вакансии не заполнен.'
+        if not candidate_values:
+            return 0.0, 'Нет данных кандидата'
+        overlap = expected_values & candidate_values
+        if overlap:
+            matched = ', '.join(_display_work_format(value) for value in sorted(overlap))
+            return 1.0, f'Совпало: {matched}'
+        return 0.0, 'Не совпадает формат работы'
 
     if compare_mode == 'salary_range' and isinstance(expected, dict):
         candidate_from = candidate_profile.get('salary_from')
@@ -1896,6 +1909,47 @@ def _parse_experience_range_months(label: str) -> tuple[int | None, int | None]:
             return range_value
 
     return None, None
+
+
+def _normalize_work_formats(values: list[str]) -> list[str]:
+    normalized_values: list[str] = []
+    for value in values:
+        normalized = _normalize_work_format_value(value)
+        if normalized and normalized not in normalized_values:
+            normalized_values.append(normalized)
+    return normalized_values
+
+
+def _normalize_work_format_value(value: str) -> str | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+
+    mapping = {
+        'remote': 'remote',
+        'удаленно': 'remote',
+        'удалённо': 'remote',
+        'office': 'office',
+        'on site': 'office',
+        'on_site': 'office',
+        'на месте работодателя': 'office',
+        'hybrid': 'hybrid',
+        'гибрид': 'hybrid',
+    }
+
+    if normalized in mapping:
+        return mapping[normalized]
+    if normalized.upper() in {'REMOTE', 'OFFICE', 'HYBRID'}:
+        return normalized.lower()
+    return None
+
+
+def _display_work_format(value: str) -> str:
+    return {
+        'remote': 'удалённо',
+        'office': 'офис',
+        'hybrid': 'гибрид',
+    }.get(value, value)
 
 
 def _normalize_tokens(values: list[str]) -> set[str]:
