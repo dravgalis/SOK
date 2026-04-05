@@ -200,7 +200,7 @@ export function DashboardPage() {
                       {getVacancyMetaLabel(activeTab)}: {getVacancyMetaDate(activeTab, vacancy)}
                     </span>
                     <span>Статус: {getNormalizedStatus(activeTab, vacancy)}</span>
-                    <span>Отклики: {vacancy.responses_count ?? 0}</span>
+                    <span>Отклики (по счётчику HH): {vacancy.responses_count ?? 0}</span>
                     <span>ID: {vacancy.id}</span>
                   </Link>
                 </li>
