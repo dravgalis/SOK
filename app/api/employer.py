@@ -15,6 +15,20 @@ router = APIRouter()
 HH_API_BASE = 'https://api.hh.ru'
 logger = logging.getLogger(__name__)
 STATE_ALIAS_RE = re.compile(r'^(?P<base>[a-z_]+)_\d+$')
+NEGOTIATION_STATUSES = [
+    'response',
+    'consider',
+    'phone_interview',
+    'interview',
+    'assessment',
+    'offer',
+    'hired',
+    'discard_by_employer',
+    'discard_by_applicant',
+    'discard_no_interaction',
+    'discard_vacancy_closed',
+    'discard_to_other_vacancy',
+]
 
 
 @router.get('/me')
@@ -356,12 +370,13 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
         expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
     )
 
-    collection_items, collection_debug = await _fetch_followup_negotiations_from_collections(
-        client,
-        access_token=access_token,
-        vacancy_id=vacancy_id,
-        payload=seed_payload,
-    )
+    # Временно отключаем collections-поток для снижения нагрузки и задержек.
+    collection_items: list[dict] = []
+    collection_debug: dict[str, object] = {
+        'urls_processed': 0,
+        'pages_loaded': 0,
+        'errors': [],
+    }
 
     merged_raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
@@ -376,12 +391,18 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             seen_raw_keys.add(raw_key)
             merged_raw_items.append(item)
 
+    if len(merged_raw_items) > 50:
+        merged_raw_items = merged_raw_items[:50]
+
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
     raw_items_without_id = 0
     duplicate_items = 0
+    resumes_profiles = await _fetch_resumes_profiles(client, access_token=access_token, items=merged_raw_items)
 
     for item in merged_raw_items:
+        resume_id = _extract_resume_id(item)
+        resume_profile = resumes_profiles.get(resume_id) if resume_id else None
         normalized_item = _normalize_response(item)
         score, score_breakdown = _score_candidate_against_vacancy(
             vacancy_criteria=vacancy_criteria,
