@@ -126,7 +126,13 @@ function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[n
   }
 
   if (criterion === 'location') {
-    return { matched: item.matched, text: item.matched ? 'Локация подходит' : 'Локация не совпадает' };
+    if (item.matched) {
+      return { matched: true, text: 'Локация подходит' };
+    }
+    if (reason.includes('удален')) {
+      return { matched: false, text: 'Локация не совпадает (удалённая работа)' };
+    }
+    return { matched: false, text: 'Локация не совпадает' };
   }
 
   if (criterion === 'salary') {
@@ -154,7 +160,13 @@ export function VacancyDetailsPage() {
   const [responsesPage, setResponsesPage] = useState(1);
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
-  const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
+  const [responsesPerPage, setResponsesPerPage] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('perPage') : null;
+    const parsed = saved ? Number(saved) : NaN;
+    return RESPONSES_PER_PAGE_OPTIONS.includes(parsed as (typeof RESPONSES_PER_PAGE_OPTIONS)[number])
+      ? parsed
+      : DEFAULT_RESPONSES_PER_PAGE;
+  });
   const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
   const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,6 +178,10 @@ export function VacancyDetailsPage() {
 
   useEffect(() => {
     setResponsesPage(1);
+  }, [responsesPerPage]);
+
+  useEffect(() => {
+    window.localStorage.setItem('perPage', String(responsesPerPage));
   }, [responsesPerPage]);
 
   useEffect(() => {
@@ -399,9 +415,12 @@ export function VacancyDetailsPage() {
                             <ul>
                               {response.score_breakdown.map((item, idx) => {
                                 const row = buildTooltipRow(item);
+                                const isPartial = item.criterion === 'location' && row.text.includes('удалённая работа');
+                                const icon = isPartial ? '~' : row.matched ? '✔' : '✖';
+                                const iconClass = isPartial ? 'match partial' : row.matched ? 'match ok' : 'match fail';
                                 return (
                                   <li key={`${response.response_id}-${item.criterion}-${idx}`}>
-                                    <span className={`match ${row.matched ? 'ok' : 'fail'}`}>{row.matched ? '✔' : '✖'}</span>
+                                    <span className={iconClass}>{icon}</span>
                                     <span className="tooltip-label">{row.text}</span>
                                   </li>
                                 );

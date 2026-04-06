@@ -1661,6 +1661,9 @@ def _score_candidate_against_vacancy(
                 'Опыт обнулен: совпадение по специализации ниже 0.5 '
                 f'({round(specialization_match_ratio, 3)}).'
             )
+        if criterion == 'location' and match_ratio <= 0 and _is_remote_friendly_vacancy(vacancy_criteria):
+            match_ratio = 0.5
+            reason = 'Локация не совпадает, но вакансия удаленная: влияние критерия снижено.'
         criterion_max_points: float = float(weight)
         if criterion == 'experience' and compare_mode == 'experience_range' and isinstance(expected, dict):
             experience_points, experience_reason = _calculate_experience_points(
@@ -1907,6 +1910,16 @@ def _calculate_experience_points(
         f'Опыт {candidate_months} мес.: ratio={round(ratio, 3)} '
         f'(база={base_points}, bonus={bonus}, cap=35, max_base={max_base}).'
     )
+
+
+def _is_remote_friendly_vacancy(vacancy_criteria: dict[str, dict[str, object]]) -> bool:
+    work_format = vacancy_criteria.get('work_format', {})
+    if not isinstance(work_format, dict):
+        return False
+    expected = work_format.get('expected')
+    expected_values = _as_string_list(expected)
+    normalized = _normalize_tokens(expected_values)
+    return any(token in normalized for token in {'удаленная работа', 'удаленно', 'remote'})
 
 
 def _extract_names_from_list(values: list[object]) -> list[str]:
