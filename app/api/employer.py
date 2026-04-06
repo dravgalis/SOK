@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from difflib import SequenceMatcher
 from html import unescape
 from urllib.parse import urlparse
 from urllib.parse import unquote
@@ -1466,7 +1467,10 @@ def _extract_vacancy_criteria(vacancy_payload: dict) -> dict[str, dict[str, obje
     )
     add_criterion(
         criterion_id='specialization',
-        expected=_extract_names_from_list(vacancy_payload.get('professional_roles') if isinstance(vacancy_payload.get('professional_roles'), list) else []),
+        expected={
+            'names': _extract_names_from_list(vacancy_payload.get('professional_roles') if isinstance(vacancy_payload.get('professional_roles'), list) else []),
+            'role_ids': _extract_ids_from_list(vacancy_payload.get('professional_roles') if isinstance(vacancy_payload.get('professional_roles'), list) else []),
+        },
         compare_mode='token_overlap',
         importance='required',
         label='Специализация',
@@ -1676,6 +1680,8 @@ def _score_candidate_against_vacancy(
             points = float(experience_points)
             match_ratio = points / criterion_max_points if criterion_max_points > 0 else 0.0
             reason = experience_reason
+        elif criterion == 'specialization':
+            points = float(round(weight * match_ratio))
         else:
             points = round(weight * match_ratio, 2)
 
@@ -1728,6 +1734,9 @@ def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None
     specialization_names = _extract_names_from_list(
         resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), list) else []
     )
+    specialization_role_ids = _extract_ids_from_list(
+        resume_source.get('professional_roles') if isinstance(resume_source.get('professional_roles'), list) else []
+    )
     resume_title = resume_source.get('title') if isinstance(resume_source.get('title'), str) else None
     parsed_experience_months = _extract_candidate_experience_months(resume_source, item)
     skill_candidates = _extract_names_from_list(
@@ -1753,6 +1762,7 @@ def _extract_candidate_profile(item: dict, *, resume_profile: dict | None = None
     return {
         'skills': skill_candidates,
         'specialization': specialization_names or ([resume_title] if resume_title else []),
+        'specialization_role_ids': specialization_role_ids,
         'location': [area.get('name')] if isinstance(area.get('name'), str) and area.get('name').strip() else [],
         'salary_from': salary.get('from') if isinstance(salary.get('from'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
         'salary_to': salary.get('to') if isinstance(salary.get('to'), (int, float)) else salary.get('amount') if isinstance(salary.get('amount'), (int, float)) else None,
@@ -1775,6 +1785,30 @@ def _match_criterion(
     expected: object,
     candidate_profile: dict[str, object],
 ) -> tuple[float, str]:
+    if criterion == 'specialization':
+        expected_payload = expected if isinstance(expected, dict) else {}
+        expected_names = _as_string_list(expected_payload.get('names'))
+        expected_role_ids = set(_as_string_list(expected_payload.get('role_ids')))
+        candidate_names = _as_string_list(candidate_profile.get('specialization'))
+        candidate_role_ids = set(_as_string_list(candidate_profile.get('specialization_role_ids')))
+
+        if expected_role_ids and candidate_role_ids and expected_role_ids & candidate_role_ids:
+            return 1.0, 'Совпала специализация по role_id (полное совпадение).'
+
+        if not expected_names:
+            return 0.0, 'Критерий вакансии не заполнен.'
+        if not candidate_names:
+            return 0.0, 'Нет данных кандидата для сравнения.'
+
+        similarity = _token_set_ratio(expected_names, candidate_names)
+        if similarity < 40:
+            return 0.0, f'Специализация не совпадает (fuzzy={similarity}).'
+        if similarity > 85:
+            return 1.0, f'Высокое текстовое совпадение специализации (fuzzy={similarity}).'
+
+        ratio = similarity / 100.0
+        return ratio, f'Частичное текстовое совпадение специализации (fuzzy={similarity}).'
+
     if compare_mode == 'token_overlap':
         if criterion == 'skills':
             expected_tokens = _normalize_skill_tokens(_as_string_list(expected))
@@ -1789,16 +1823,13 @@ def _match_criterion(
         overlap = len(expected_tokens & candidate_tokens)
         if criterion == 'location':
             ratio = 1.0 if overlap > 0 else 0.0
-        elif criterion == 'specialization':
-            ratio = 1.0 if overlap > 0 else 0.0
         elif criterion == 'work_format':
             ratio = 1.0 if overlap > 0 else 0.0
         else:
             ratio = overlap / max(len(expected_tokens), 1)
-        if criterion in {'skills', 'specialization'} and overlap > 0:
+        if criterion == 'skills' and overlap > 0:
             matched_values = sorted(expected_tokens & candidate_tokens)
-            label = 'Совпали навыки' if criterion == 'skills' else 'Совпала специализация'
-            return ratio, f'{label}: {", ".join(matched_values)}'
+            return ratio, f'Совпали навыки: {", ".join(matched_values)}'
         if criterion == 'work_format':
             if overlap > 0:
                 matched_values = sorted(expected_tokens & candidate_tokens)
@@ -1932,6 +1963,17 @@ def _extract_names_from_list(values: list[object]) -> list[str]:
             name = value.get('name')
             if isinstance(name, str) and name.strip():
                 result.append(name.strip())
+    return result
+
+
+def _extract_ids_from_list(values: list[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        raw_id = value.get('id')
+        if isinstance(raw_id, str) and raw_id.strip():
+            result.append(raw_id.strip())
     return result
 
 
@@ -2111,6 +2153,44 @@ def _normalize_tokens(values: list[str]) -> set[str]:
         if normalized:
             tokens.add(normalized)
     return tokens
+
+
+def _token_set_ratio(left_values: list[str], right_values: list[str]) -> int:
+    left_tokens = _tokenize_for_fuzzy(left_values)
+    right_tokens = _tokenize_for_fuzzy(right_values)
+    if not left_tokens or not right_tokens:
+        return 0
+
+    common = sorted(left_tokens & right_tokens)
+    left_diff = sorted(left_tokens - right_tokens)
+    right_diff = sorted(right_tokens - left_tokens)
+
+    sorted_common = ' '.join(common)
+    sorted_left = ' '.join(common + left_diff).strip()
+    sorted_right = ' '.join(common + right_diff).strip()
+
+    ratio_full = _sequence_ratio(sorted_left, sorted_right)
+    ratio_left = _sequence_ratio(sorted_common, sorted_left) if sorted_common else 0
+    ratio_right = _sequence_ratio(sorted_common, sorted_right) if sorted_common else 0
+    return max(ratio_full, ratio_left, ratio_right)
+
+
+def _tokenize_for_fuzzy(values: list[str]) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        for chunk in normalized.split():
+            if chunk:
+                tokens.add(chunk)
+    return tokens
+
+
+def _sequence_ratio(left: str, right: str) -> int:
+    if not left or not right:
+        return 0
+    return int(round(100 * SequenceMatcher(None, left, right).ratio()))
 
 
 def _normalize_skill_tokens(values: list[str]) -> set[str]:
