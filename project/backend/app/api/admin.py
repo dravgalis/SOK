@@ -1,11 +1,15 @@
 import os
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
 from ..core.config import get_settings
 
-router = APIRouter(prefix='/admin', tags=['admin'])
+router = APIRouter(prefix='/api/admin', tags=['admin'])
+
+ADMIN_SESSION_COOKIE = 'admin_session'
+ADMIN_SESSION_TTL_DAYS = 7
 
 
 class AdminLoginRequest(BaseModel):
