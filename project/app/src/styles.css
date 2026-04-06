@@ -26,6 +26,7 @@
 
   --shadow-card: 0 10px 30px rgba(15, 23, 42, 0.08);
   --shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --shadow-floating: 0 10px 30px rgba(15, 23, 42, 0.08);
 
   --score-high-start: #22c55e;
   --score-high-end: #16a34a;
@@ -504,15 +505,15 @@ p {
 }
 
 .score-tooltip {
-  position: absolute;
-  right: 0;
-  top: 130%;
+  position: fixed;
+  top: 120px;
+  right: 32px;
   width: 260px;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--card);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-floating);
   opacity: 0;
   visibility: hidden;
   transform: translateY(4px);
@@ -564,6 +565,10 @@ p {
 
 .match.fail {
   color: var(--text-danger);
+}
+
+.match.partial {
+  color: var(--score-medium-end);
 }
 
 .tooltip-label {
