@@ -488,9 +488,11 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  isolation: isolate;
 }
 
 .score-info-icon {
+  appearance: none;
   width: 18px;
   height: 18px;
   border-radius: 999px;
@@ -502,28 +504,35 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: help;
+  padding: 0;
+  line-height: 1;
 }
 
 .score-tooltip {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 260px;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(320px, 88vw);
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--card);
   box-shadow: var(--shadow-floating);
+  color: var(--text);
   opacity: 0;
   visibility: hidden;
+  pointer-events: none;
   transform: translateY(4px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
   z-index: 999999;
 }
 
-.score-tooltip-visible {
+.score-tooltip-wrap:hover .score-tooltip,
+.score-tooltip-wrap:focus-within .score-tooltip {
   opacity: 1;
   visibility: visible;
+  pointer-events: auto;
   transform: translateY(0);
 }
 
@@ -578,13 +587,17 @@ p {
 
 @media (max-width: 768px) {
   .score-tooltip {
-    left: 50% !important;
+    position: fixed;
+    right: auto;
+    top: auto;
+    bottom: 16px;
+    left: 50%;
     transform: translateX(-50%);
     width: 90vw;
     max-width: 320px;
   }
-
-  .score-tooltip-visible {
+  .score-tooltip-wrap:hover .score-tooltip,
+  .score-tooltip-wrap:focus-within .score-tooltip {
     transform: translateX(-50%);
   }
 }

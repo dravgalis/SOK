@@ -449,27 +449,12 @@ export function VacancyDetailsPage() {
                       </h3>
                       <div
                         className="score-tooltip-wrap"
-                        onMouseEnter={(event) => {
-                          const icon = event.currentTarget.querySelector<HTMLElement>('.score-info-icon');
-                          if (!icon) return;
-                          const rect = icon.getBoundingClientRect();
-                          setActiveTooltipId(response.response_id);
-                          setTooltipPosition({
-                            top: rect.top - 10,
-                            left: window.innerWidth <= 768 ? window.innerWidth / 2 : rect.left,
-                          });
-                        }}
-                        onMouseLeave={() => setActiveTooltipId(null)}
                       >
-                        <span className="score-info-icon" aria-hidden="true" data-tooltip-icon-id={response.response_id}>
+                        <button type="button" className="score-info-icon" aria-label="Показать разбор совпадения">
                           !
-                        </span>
+                        </button>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div
-                          ref={activeTooltipId === response.response_id ? tooltipRef : null}
-                          className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`}
-                          style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }}
-                        >
+                        <div className="score-tooltip" role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
