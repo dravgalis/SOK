@@ -212,7 +212,7 @@ export function VacancyDetailsPage() {
       if (!activeTooltipId) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target.closest(`[data-tooltip-wrap-id="${activeTooltipId}"]`)) return;
+      if (target.closest('.score-tooltip-wrap')) return;
       setActiveTooltipId(null);
     };
 
@@ -475,7 +475,7 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <div className="score-tooltip-wrap" data-tooltip-wrap-id={response.response_id}>
+                      <div className="score-tooltip-wrap">
                         <button
                           type="button"
                           className="score-info-icon"
