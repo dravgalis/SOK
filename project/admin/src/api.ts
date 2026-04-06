@@ -23,7 +23,8 @@ export async function adminLogin(login: string, password: string): Promise<strin
   });
 
   if (!response.ok) {
-    throw new Error('Неверный логин или пароль.');
+    const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(payload.detail ?? 'Неверный логин или пароль.');
   }
 
   const payload = (await response.json()) as { token?: string };

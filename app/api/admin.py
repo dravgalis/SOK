@@ -31,10 +31,13 @@ async def admin_login(payload: AdminLoginRequest) -> dict[str, str | bool]:
     expected_login = os.getenv('ADMIN_LOGIN', '').strip()
     expected_password = os.getenv('ADMIN_PASSWORD', '').strip()
 
-    if not expected_login or not expected_password:
-        raise HTTPException(status_code=500, detail='Admin credentials are not configured.')
+    normalized_login = payload.login.strip()
+    normalized_password = payload.password.strip()
 
-    if payload.login != expected_login or payload.password != expected_password:
+    if not expected_login or not expected_password:
+        raise HTTPException(status_code=401, detail='ADMIN_LOGIN/ADMIN_PASSWORD are not configured on backend.')
+
+    if normalized_login != expected_login or normalized_password != expected_password:
         raise HTTPException(status_code=401, detail='Invalid admin credentials.')
 
     return {'success': True, 'token': _admin_token()}

@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
@@ -27,10 +29,15 @@ def _require_admin_token(authorization: str | None) -> None:
 async def admin_login(payload: AdminLoginRequest) -> dict[str, str | bool]:
     settings = get_settings()
 
-    if not settings.admin_login or not settings.admin_password:
-        raise HTTPException(status_code=500, detail='Admin credentials are not configured.')
+    expected_login = os.getenv('ADMIN_LOGIN', settings.admin_login).strip()
+    expected_password = os.getenv('ADMIN_PASSWORD', settings.admin_password).strip()
+    normalized_login = payload.login.strip()
+    normalized_password = payload.password.strip()
 
-    if payload.login != settings.admin_login or payload.password != settings.admin_password:
+    if not expected_login or not expected_password:
+        raise HTTPException(status_code=401, detail='ADMIN_LOGIN/ADMIN_PASSWORD are not configured on backend.')
+
+    if normalized_login != expected_login or normalized_password != expected_password:
         raise HTTPException(status_code=401, detail='Invalid admin credentials.')
 
     return {

@@ -16,7 +16,7 @@ export function LoginPage() {
     setLoading(true);
 
     try {
-      const token = await adminLogin(login, password);
+      const token = await adminLogin(login.trim(), password.trim());
       setAdminToken(token);
       navigate('/admin', { replace: true });
     } catch (err) {
