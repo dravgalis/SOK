@@ -488,10 +488,11 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  z-index: 10;
+  isolation: isolate;
 }
 
 .score-info-icon {
+  appearance: none;
   width: 18px;
   height: 18px;
   border-radius: 999px;
@@ -503,29 +504,39 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: help;
+  padding: 0;
+  line-height: 1;
 }
 
 .score-tooltip {
-  position: absolute;
-  top: 130%;
-  right: 0;
-  width: 260px;
+  position: fixed;
+  right: auto;
+  top: auto;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(360px, 88vw);
   padding: 12px;
   border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--card);
   box-shadow: var(--shadow-floating);
+  color: var(--text);
   opacity: 0;
   visibility: hidden;
-  transform: translateY(4px);
+  pointer-events: none;
+  transform: translateX(-50%) translateY(4px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
-  z-index: 9999;
+  z-index: 999999;
 }
 
-.score-tooltip-wrap:hover .score-tooltip {
+.score-tooltip-wrap:hover .score-tooltip,
+.score-tooltip-wrap:focus-within .score-tooltip {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0);
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
 }
 
 .score-tooltip h4 {
@@ -575,6 +586,17 @@ p {
 .tooltip-label {
   color: var(--text-subtle);
   font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .score-tooltip {
+    width: 90vw;
+    max-width: 320px;
+  }
+  .score-tooltip-wrap:hover .score-tooltip,
+  .score-tooltip-wrap:focus-within .score-tooltip {
+    transform: translateX(-50%) translateY(0);
+  }
 }
 
 .score-badge-high {
