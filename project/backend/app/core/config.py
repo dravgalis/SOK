@@ -24,6 +24,12 @@ class Settings(BaseModel):
     cookie_secure: bool = os.getenv('COOKIE_SECURE', 'true').lower() == 'true'
     cookie_samesite: Literal['lax', 'strict', 'none'] = os.getenv('COOKIE_SAMESITE', 'none').lower()  # type: ignore[assignment]
 
+    admin_login: str = os.getenv('ADMIN_LOGIN', '')
+    admin_password: str = os.getenv('ADMIN_PASSWORD', '')
+    admin_token: str = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+
+    users_db_path: str = os.getenv('USERS_DB_PATH', str(BASE_DIR / 'project' / 'backend' / 'users.db'))
+
     cors_origins_raw: str = os.getenv('CORS_ORIGINS', 'http://localhost:5173,https://sok-app.onrender.com')
 
     @property

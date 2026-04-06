@@ -4,6 +4,7 @@ from fastapi import APIRouter, Cookie, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from ..core.config import get_settings
+from ..core.db import upsert_hh_user
 from ..services.hh_client import HHClient, HHClientError
 from ..services.hh_oauth import HHOAuthService
 
@@ -62,6 +63,15 @@ async def hh_callback(
     try:
         access_token = await hh_client.exchange_code(code)
     except HHClientError as exc:
+        return _frontend_redirect(
+            settings.frontend_app_url,
+            {'auth': 'error', 'message': str(exc)},
+        )
+
+    try:
+        me_payload = await hh_client.get_current_user(access_token)
+        _track_hh_user_login(me_payload)
+    except (HHClientError, ValueError) as exc:
         return _frontend_redirect(
             settings.frontend_app_url,
             {'auth': 'error', 'message': str(exc)},
@@ -388,6 +398,41 @@ def _build_full_name(first_name: object, last_name: object) -> str | None:
     last = _as_string_or_none(last_name)
     full_name = ' '.join(part for part in (first, last) if part)
     return full_name or None
+
+
+def _track_hh_user_login(payload: dict[str, object]) -> None:
+    hh_id_raw = payload.get('id')
+    hh_id = str(hh_id_raw).strip() if hh_id_raw is not None else ''
+    if not hh_id:
+        raise ValueError('Не удалось определить идентификатор пользователя HH.')
+
+    first_name = payload.get('first_name')
+    last_name = payload.get('last_name')
+    payload_name = payload.get('name') if isinstance(payload.get('name'), str) else None
+    name = _build_full_name(first_name, last_name) or payload_name or f'HH User {hh_id}'
+    email = _extract_email(payload)
+
+    upsert_hh_user(hh_id=hh_id, name=name, email=email)
+
+
+def _extract_email(payload: dict[str, object]) -> str | None:
+    direct_email = payload.get('email')
+    if isinstance(direct_email, str) and direct_email:
+        return direct_email
+
+    account = payload.get('account')
+    if isinstance(account, dict):
+        account_email = account.get('email')
+        if isinstance(account_email, str) and account_email:
+            return account_email
+
+    personal = payload.get('personal')
+    if isinstance(personal, dict):
+        personal_email = personal.get('email')
+        if isinstance(personal_email, str) and personal_email:
+            return personal_email
+
+    return None
 
 
 def _extract_candidate_name(item: dict[str, object]) -> tuple[str | None, str | None]:
