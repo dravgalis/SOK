@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { clearAdminToken } from '../auth';
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', end: true },
@@ -8,6 +9,13 @@ const navItems = [
 ];
 
 export function AdminLayout() {
+  const navigate = useNavigate();
+
+  function handleLogout() {
+    clearAdminToken();
+    navigate('/', { replace: true });
+  }
+
   return (
     <div className="admin-layout">
       <aside className="sidebar">
@@ -26,6 +34,10 @@ export function AdminLayout() {
             </NavLink>
           ))}
         </nav>
+
+        <button className="logout-button" onClick={handleLogout} type="button">
+          Выйти
+        </button>
       </aside>
 
       <main className="admin-content">

@@ -14,6 +14,53 @@ body {
   color: #111827;
 }
 
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 24px;
+  background: #ffffff;
+  display: grid;
+  gap: 10px;
+}
+
+.field-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.text-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 1rem;
+}
+
+.primary-button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 6px;
+}
+
+.primary-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .admin-layout {
   min-height: 100vh;
   display: grid;
@@ -24,6 +71,8 @@ body {
   border-right: 1px solid #e5e7eb;
   padding: 24px 16px;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
@@ -51,6 +100,15 @@ body {
 .sidebar-link-active {
   background: #111827;
   color: #ffffff;
+}
+
+.logout-button {
+  margin-top: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+  cursor: pointer;
 }
 
 .admin-content {
@@ -84,6 +142,10 @@ h2 {
   border-radius: 12px;
   padding: 16px;
   background: #ffffff;
+}
+
+.section-gap {
+  margin-top: 16px;
 }
 
 .list {
@@ -121,5 +183,10 @@ h2 {
   .sidebar {
     border-right: none;
     border-bottom: 1px solid #e5e7eb;
+    gap: 10px;
+  }
+
+  .logout-button {
+    margin-top: 0;
   }
 }
