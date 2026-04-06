@@ -1617,6 +1617,7 @@ def _score_candidate_against_vacancy(
     breakdown: list[dict[str, object]] = []
     total_weight = 0
     earned_weight = 0.0
+    specialization_match_ratio: float | None = None
 
     for criterion, config in vacancy_criteria.items():
         weight = criterion_weights.get(criterion, 5)
@@ -1635,6 +1636,31 @@ def _score_candidate_against_vacancy(
             expected=expected,
             candidate_profile=candidate_profile,
         )
+        if criterion == 'specialization':
+            specialization_match_ratio = match_ratio
+        if criterion == 'experience' and specialization_match_ratio is None and 'specialization' in vacancy_criteria:
+            specialization_config = vacancy_criteria.get('specialization', {})
+            specialization_expected = (
+                specialization_config.get('expected') if isinstance(specialization_config, dict) else None
+            )
+            specialization_compare_mode = (
+                specialization_config.get('compare_mode')
+                if isinstance(specialization_config, dict) and isinstance(specialization_config.get('compare_mode'), str)
+                else 'token_overlap'
+            )
+            if specialization_expected:
+                specialization_match_ratio, _ = _match_criterion(
+                    criterion='specialization',
+                    compare_mode=specialization_compare_mode,
+                    expected=specialization_expected,
+                    candidate_profile=candidate_profile,
+                )
+        if criterion == 'experience' and isinstance(specialization_match_ratio, float) and specialization_match_ratio < 0.5:
+            match_ratio = 0.0
+            reason = (
+                'Опыт обнулен: совпадение по специализации ниже 0.5 '
+                f'({round(specialization_match_ratio, 3)}).'
+            )
         points = round(weight * match_ratio, 2)
         total_weight += weight
         earned_weight += points
@@ -1782,14 +1808,23 @@ def _match_criterion(
 
         if isinstance(min_months, int) and candidate_months < min_months:
             return 0.0, f'Опыт кандидата {candidate_months} мес., требуется от {min_months} мес. ({experience_label}).'
-        if isinstance(max_months, int) and candidate_months > max_months:
-            return 0.7, f'Опыт кандидата {candidate_months} мес., выше диапазона до {max_months} мес. ({experience_label}).'
-        if isinstance(min_months, int) or isinstance(max_months, int):
-            if isinstance(min_months, int) and isinstance(max_months, int):
-                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует {min_months}–{max_months} мес.'
-            if isinstance(min_months, int):
-                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует от {min_months} мес.'
-            return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует до {max_months} мес.'
+        if isinstance(max_months, int) and max_months > 0:
+            score = min(candidate_months / max_months, 1.3)
+            if candidate_months > max_months:
+                return score, (
+                    f'Опыт кандидата {candidate_months} мес., выше верхней границы {max_months} мес. '
+                    f'Бонус применен, score={round(score, 3)}.'
+                )
+            return score, (
+                f'Опыт кандидата {candidate_months} мес., пропорциональный score={round(score, 3)} '
+                f'при верхней границе {max_months} мес.'
+            )
+        if isinstance(min_months, int) and min_months > 0:
+            score = min(candidate_months / min_months, 1.3)
+            return score, (
+                f'Опыт кандидата {candidate_months} мес., score={round(score, 3)} '
+                f'относительно минимальной границы {min_months} мес.'
+            )
 
         candidate_text_tokens = _normalize_tokens(_as_string_list(candidate_profile.get('experience')))
         expected_tokens = _normalize_tokens([experience_label])
