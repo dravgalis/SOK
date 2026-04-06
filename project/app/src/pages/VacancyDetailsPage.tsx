@@ -168,7 +168,10 @@ export function VacancyDetailsPage() {
       : DEFAULT_RESPONSES_PER_PAGE;
   });
   const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
+  const [activeTooltipId, setActiveTooltipId] = useState<string | null>(null);
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -252,6 +255,46 @@ export function VacancyDetailsPage() {
 
     void loadData();
   }, [vacancyId, responsesPage, responsesPerPage]);
+
+  useEffect(() => {
+    if (!activeTooltipId) return;
+
+    const icon = document.querySelector<HTMLElement>(`[data-tooltip-icon-id="${activeTooltipId}"]`);
+    if (!icon) return;
+
+    const updatePosition = () => {
+      const rect = icon.getBoundingClientRect();
+      let top = rect.top - 10;
+      let left = rect.left;
+      const tooltipElement = tooltipRef.current;
+
+      if (window.innerWidth <= 768) {
+        left = window.innerWidth / 2;
+      } else if (tooltipElement) {
+        const margin = 8;
+        const maxLeft = window.innerWidth - tooltipElement.offsetWidth - margin;
+        left = Math.min(Math.max(left, margin), Math.max(margin, maxLeft));
+      }
+
+      if (tooltipElement) {
+        const minTop = 8;
+        if (top < minTop) {
+          top = rect.bottom + 10;
+        }
+      }
+
+      setTooltipPosition({ top, left });
+    };
+
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [activeTooltipId]);
 
   const vacancyStatus = useMemo(() => {
     if (!vacancy) return '—';
@@ -404,12 +447,29 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <div className="score-tooltip-wrap">
-                        <span className="score-info-icon" aria-hidden="true">
+                      <div
+                        className="score-tooltip-wrap"
+                        onMouseEnter={(event) => {
+                          const icon = event.currentTarget.querySelector<HTMLElement>('.score-info-icon');
+                          if (!icon) return;
+                          const rect = icon.getBoundingClientRect();
+                          setActiveTooltipId(response.response_id);
+                          setTooltipPosition({
+                            top: rect.top - 10,
+                            left: window.innerWidth <= 768 ? window.innerWidth / 2 : rect.left,
+                          });
+                        }}
+                        onMouseLeave={() => setActiveTooltipId(null)}
+                      >
+                        <span className="score-info-icon" aria-hidden="true" data-tooltip-icon-id={response.response_id}>
                           !
                         </span>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div className="score-tooltip">
+                        <div
+                          ref={activeTooltipId === response.response_id ? tooltipRef : null}
+                          className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`}
+                          style={{ top: `${tooltipPosition.top}px`, left: `${tooltipPosition.left}px` }}
+                        >
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
