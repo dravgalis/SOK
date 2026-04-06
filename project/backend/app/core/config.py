@@ -30,7 +30,10 @@ class Settings(BaseModel):
 
     users_db_path: str = os.getenv('USERS_DB_PATH', str(BASE_DIR / 'project' / 'backend' / 'users.db'))
 
-    cors_origins_raw: str = os.getenv('CORS_ORIGINS', 'http://localhost:5173,https://sok-app.onrender.com')
+    cors_origins_raw: str = os.getenv(
+        'CORS_ORIGINS',
+        'http://localhost:5173,https://sok-app.onrender.com,https://sok-1.onrender.com',
+    )
 
     @property
     def cors_origins(self) -> list[str]:

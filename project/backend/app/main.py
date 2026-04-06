@@ -8,10 +8,11 @@ from .core.db import init_users_table
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
+cors_origins = list(dict.fromkeys([*settings.cors_origins, 'https://sok-1.onrender.com']))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
