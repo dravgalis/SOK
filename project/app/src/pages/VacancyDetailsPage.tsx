@@ -122,7 +122,13 @@ function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[n
   }
 
   if (criterion === 'specialization') {
-    return { matched: item.matched, text: item.matched ? 'Специализация подходит' : 'Специализация не подходит' };
+    if (item.matched) {
+      return { matched: true, text: 'Специализация подходит (точное совпадение)' };
+    }
+    if (item.points > 0) {
+      return { matched: false, text: `Специализация частично совпадает (${item.points} из ${item.max_points})` };
+    }
+    return { matched: false, text: 'Специализация не подходит' };
   }
 
   if (criterion === 'location') {
@@ -404,18 +410,22 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <div className="score-tooltip-wrap">
-                        <span className="score-info-icon" aria-hidden="true">
+                      <div
+                        className="score-tooltip-wrap"
+                      >
+                        <button type="button" className="score-info-icon" aria-label="Показать разбор совпадения">
                           !
-                        </span>
+                        </button>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div className="score-tooltip">
+                        <div className="score-tooltip" role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
                               {response.score_breakdown.map((item, idx) => {
                                 const row = buildTooltipRow(item);
-                                const isPartial = item.criterion === 'location' && row.text.includes('удалённая работа');
+                                const isPartial =
+                                  (item.criterion === 'location' && row.text.includes('удалённая работа')) ||
+                                  (item.criterion === 'specialization' && item.points > 0 && !item.matched);
                                 const icon = isPartial ? '~' : row.matched ? '✔' : '✖';
                                 const iconClass = isPartial ? 'match partial' : row.matched ? 'match ok' : 'match fail';
                                 return (
