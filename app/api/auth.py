@@ -6,6 +6,8 @@ import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 
+from ..core.admin_store import upsert_hh_user
+
 router = APIRouter()
 
 _STATE_STORE: set[str] = set()
@@ -78,6 +80,18 @@ async def hh_callback(
     if not access_token:
         return _frontend_error_redirect(frontend_url, 'token_missing')
 
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            me_response = await client.get(
+                'https://api.hh.ru/me',
+                headers={'Authorization': f'Bearer {access_token}'},
+            )
+        me_response.raise_for_status()
+        me_payload = me_response.json()
+        _track_hh_user_login(me_payload)
+    except (httpx.HTTPError, ValueError):
+        return _frontend_error_redirect(frontend_url, 'failed_to_track_user')
+
     redirect_response = RedirectResponse(url=f'{frontend_url.rstrip("/")}/app', status_code=307)
     redirect_response.set_cookie(
         key='access_token',
@@ -97,3 +111,21 @@ def _get_env(name: str, default: str = '') -> str:
 def _frontend_error_redirect(base_url: str, message: str) -> RedirectResponse:
     redirect_url = f"{base_url.rstrip('/')}/?{urlencode({'auth': 'error', 'message': message})}"
     return RedirectResponse(url=redirect_url, status_code=307)
+
+
+def _track_hh_user_login(payload: dict[str, object]) -> None:
+    hh_id_raw = payload.get('id')
+    hh_id = str(hh_id_raw).strip() if hh_id_raw is not None else ''
+    if not hh_id:
+        raise ValueError('hh_id_missing')
+
+    first_name = payload.get('first_name')
+    last_name = payload.get('last_name')
+    full_name = ' '.join(part for part in [str(first_name or '').strip(), str(last_name or '').strip()] if part)
+    fallback_name = payload.get('name') if isinstance(payload.get('name'), str) else None
+    name = full_name or fallback_name or f'HH User {hh_id}'
+
+    email_raw = payload.get('email')
+    email = email_raw if isinstance(email_raw, str) and email_raw else None
+
+    upsert_hh_user(hh_id=hh_id, name=name, email=email)
