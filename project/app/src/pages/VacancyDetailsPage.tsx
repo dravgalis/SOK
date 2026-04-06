@@ -176,7 +176,6 @@ export function VacancyDetailsPage() {
   const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
   const [activeTooltipId, setActiveTooltipId] = useState<string | null>(null);
   const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -283,46 +282,6 @@ export function VacancyDetailsPage() {
 
     void loadData();
   }, [vacancyId, responsesPage, responsesPerPage]);
-
-  useEffect(() => {
-    if (!activeTooltipId) return;
-
-    const icon = document.querySelector<HTMLElement>(`[data-tooltip-icon-id="${activeTooltipId}"]`);
-    if (!icon) return;
-
-    const updatePosition = () => {
-      const rect = icon.getBoundingClientRect();
-      let top = rect.top - 10;
-      let left = rect.left;
-      const tooltipElement = tooltipRef.current;
-
-      if (window.innerWidth <= 768) {
-        left = window.innerWidth / 2;
-      } else if (tooltipElement) {
-        const margin = 8;
-        const maxLeft = window.innerWidth - tooltipElement.offsetWidth - margin;
-        left = Math.min(Math.max(left, margin), Math.max(margin, maxLeft));
-      }
-
-      if (tooltipElement) {
-        const minTop = 8;
-        if (top < minTop) {
-          top = rect.bottom + 10;
-        }
-      }
-
-      setTooltipPosition({ top, left });
-    };
-
-    updatePosition();
-    window.addEventListener('scroll', updatePosition, true);
-    window.addEventListener('resize', updatePosition);
-
-    return () => {
-      window.removeEventListener('scroll', updatePosition, true);
-      window.removeEventListener('resize', updatePosition);
-    };
-  }, [activeTooltipId]);
 
   const vacancyStatus = useMemo(() => {
     if (!vacancy) return '—';

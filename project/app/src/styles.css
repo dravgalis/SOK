@@ -512,7 +512,7 @@ p {
 .score-tooltip {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  right: 50px;
   width: min(360px, calc(100vw - 48px));
   padding: 12px;
   border-radius: 14px;
@@ -586,11 +586,16 @@ p {
 
 @media (max-width: 768px) {
   .score-tooltip {
-    right: 0;
-    left: auto;
+    right: auto;
+    left: 30vw;
     bottom: auto;
     width: min(320px, calc(100vw - 32px));
     max-width: 320px;
+    transform: translate(-50%, 4px);
+  }
+
+  .score-tooltip-visible {
+    transform: translate(-50%, 0);
   }
 }
 
