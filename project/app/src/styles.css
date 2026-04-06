@@ -488,6 +488,7 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  z-index: 10;
 }
 
 .score-info-icon {
@@ -505,9 +506,9 @@ p {
 }
 
 .score-tooltip {
-  position: fixed;
-  top: 120px;
-  right: 32px;
+  position: absolute;
+  top: 130%;
+  right: 0;
   width: 260px;
   padding: 12px;
   border-radius: 14px;
