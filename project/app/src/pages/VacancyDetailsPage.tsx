@@ -404,12 +404,14 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <div className="score-tooltip-wrap">
-                        <span className="score-info-icon" aria-hidden="true">
+                      <div
+                        className="score-tooltip-wrap"
+                      >
+                        <button type="button" className="score-info-icon" aria-label="Показать разбор совпадения">
                           !
-                        </span>
+                        </button>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div className="score-tooltip">
+                        <div className="score-tooltip" role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
