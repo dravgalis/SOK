@@ -1,6 +1,6 @@
 export const ADMIN_API = {
-  login: 'https://sok-i9cq.onrender.com/api/admin/login',
-  usersCount: 'https://sok-i9cq.onrender.com/api/admin/users-count',
+  login: 'https://sok-i9cq.onrender.com/admin/login',
+  usersCount: 'https://sok-i9cq.onrender.com/admin/users-count',
 } as const;
 
 export const ADMIN_ROUTES = {
