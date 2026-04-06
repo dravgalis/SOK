@@ -16,6 +16,84 @@ router = APIRouter()
 HH_API_BASE = 'https://api.hh.ru'
 logger = logging.getLogger(__name__)
 STATE_ALIAS_RE = re.compile(r'^(?P<base>[a-z_]+)_\d+$')
+ROLE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    'marketing manager': (
+        'marketing manager',
+        'менеджер по маркетингу',
+        'internet marketer',
+        'internet marketing manager',
+        'digital marketing manager',
+        'digital marketer',
+        'маркетолог',
+        'интернет маркетолог',
+        'performance marketer',
+        'performance marketing manager',
+    ),
+    'sales manager': (
+        'sales manager',
+        'менеджер по продажам',
+        'account executive',
+        'business development manager',
+        'bdm',
+    ),
+    'project manager': (
+        'project manager',
+        'руководитель проекта',
+        'менеджер проектов',
+        'pm',
+        'delivery manager',
+    ),
+    'product manager': (
+        'product manager',
+        'продуктовый менеджер',
+        'менеджер продукта',
+        'product owner',
+        'po',
+    ),
+    'software engineer': (
+        'software engineer',
+        'software developer',
+        'backend developer',
+        'frontend developer',
+        'full stack developer',
+        'python developer',
+        'java developer',
+        'разработчик',
+        'программист',
+        'инженер программист',
+    ),
+    'data analyst': (
+        'data analyst',
+        'аналитик данных',
+        'bi analyst',
+        'business intelligence analyst',
+        'product analyst',
+    ),
+    'data scientist': (
+        'data scientist',
+        'специалист по data science',
+        'машинное обучение инженер',
+        'ml engineer',
+        'machine learning engineer',
+    ),
+    'hr recruiter': (
+        'recruiter',
+        'hr recruiter',
+        'it recruiter',
+        'рекрутер',
+        'специалист по подбору персонала',
+        'менеджер по подбору персонала',
+    ),
+    'designer': (
+        'designer',
+        'ux designer',
+        'ui designer',
+        'product designer',
+        'графический дизайнер',
+        'веб дизайнер',
+        'дизайнер',
+    ),
+}
 
 
 @router.get('/me')
@@ -1791,6 +1869,8 @@ def _match_criterion(
         expected_role_ids = set(_as_string_list(expected_payload.get('role_ids')))
         candidate_names = _as_string_list(candidate_profile.get('specialization'))
         candidate_role_ids = set(_as_string_list(candidate_profile.get('specialization_role_ids')))
+        expected_canonical = _canonicalize_roles(expected_names)
+        candidate_canonical = _canonicalize_roles(candidate_names)
 
         if expected_role_ids and candidate_role_ids and expected_role_ids & candidate_role_ids:
             return 1.0, 'Совпала специализация по role_id (полное совпадение).'
@@ -1800,7 +1880,11 @@ def _match_criterion(
         if not candidate_names:
             return 0.0, 'Нет данных кандидата для сравнения.'
 
-        similarity = _token_set_ratio(expected_names, candidate_names)
+        canonical_overlap = sorted(expected_canonical & candidate_canonical)
+        if canonical_overlap:
+            return 1.0, f'Совпала специализация по каноническим ролям: {", ".join(canonical_overlap)}.'
+
+        similarity = _token_set_ratio(sorted(expected_canonical), sorted(candidate_canonical))
         if similarity < 40:
             return 0.0, f'Специализация не совпадает (fuzzy={similarity}).'
         if similarity > 85:
@@ -2153,6 +2237,43 @@ def _normalize_tokens(values: list[str]) -> set[str]:
         if normalized:
             tokens.add(normalized)
     return tokens
+
+
+def _canonicalize_roles(values: list[str]) -> set[str]:
+    canonicalized: set[str] = set()
+    for value in values:
+        canonical = _canonicalize_role(value)
+        if canonical:
+            canonicalized.add(canonical)
+    return canonicalized
+
+
+def _canonicalize_role(value: str) -> str:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return ''
+    mapped = _build_role_synonym_index().get(normalized)
+    return mapped if mapped else normalized
+
+
+def _build_role_synonym_index() -> dict[str, str]:
+    if hasattr(_build_role_synonym_index, '_cache'):
+        cache = getattr(_build_role_synonym_index, '_cache')
+        if isinstance(cache, dict):
+            return cache
+
+    index: dict[str, str] = {}
+    for canonical, variants in ROLE_SYNONYMS.items():
+        normalized_canonical = _normalize_text(canonical)
+        if normalized_canonical:
+            index[normalized_canonical] = normalized_canonical
+        for variant in variants:
+            normalized_variant = _normalize_text(variant)
+            if normalized_variant:
+                index[normalized_variant] = normalized_canonical
+
+    setattr(_build_role_synonym_index, '_cache', index)
+    return index
 
 
 def _token_set_ratio(left_values: list[str], right_values: list[str]) -> int:
