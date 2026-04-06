@@ -20,6 +20,7 @@ class Settings(BaseModel):
     hh_redirect_uri: str = os.getenv('HH_REDIRECT_URI', 'http://localhost:8000/api/auth/hh/callback')
 
     frontend_app_url: str = os.getenv('FRONTEND_APP_URL', 'https://sok-app.onrender.com')
+    frontend_admin_url: str = os.getenv('FRONTEND_ADMIN_URL', 'http://localhost:5175')
     app_secret_key: str = os.getenv('APP_SECRET_KEY', 'change-me-in-production')
     cookie_secure: bool = os.getenv('COOKIE_SECURE', 'true').lower() == 'true'
     cookie_samesite: Literal['lax', 'strict', 'none'] = os.getenv('COOKIE_SAMESITE', 'none').lower()  # type: ignore[assignment]
@@ -32,7 +33,7 @@ class Settings(BaseModel):
 
     cors_origins_raw: str = os.getenv(
         'CORS_ORIGINS',
-        'http://localhost:5173,https://sok-app.onrender.com,https://sok-1.onrender.com',
+        'http://localhost:5173,http://localhost:5175,https://sok-app.onrender.com,https://sok-1.onrender.com',
     )
 
     @property

@@ -74,3 +74,13 @@ def get_all_users() -> list[dict[str, str | None]]:
         }
         for row in rows
     ]
+
+
+def get_users_count() -> int:
+    with _connect() as connection:
+        row = connection.execute('SELECT COUNT(*) AS count FROM users').fetchone()
+
+    if row is None:
+        return 0
+
+    return int(row['count'])
