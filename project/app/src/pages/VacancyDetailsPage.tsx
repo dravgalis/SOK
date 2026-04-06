@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { APP_ENDPOINTS } from '../config';
 
@@ -58,7 +58,14 @@ type VacancyResponsesPayload = {
 
 const DEFAULT_RESPONSES_PER_PAGE = 25;
 const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50, 100, 200] as const;
-type ResponsesSortMode = 'score' | 'response_date';
+const CRITERIA_LABELS: Record<string, string> = {
+  skills: 'Навыки',
+  specialization: 'Специализация',
+  location: 'Локация',
+  salary: 'Зарплата',
+  experience: 'Опыт',
+  work_format: 'Формат работы',
+};
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -92,38 +99,51 @@ function hasVisibleCandidateFields(response: VacancyResponse): boolean {
 }
 
 function formatScoreValue(score?: number | null): string {
-  return typeof score === 'number' ? `Score: ${score}` : 'Score: —';
+  return typeof score === 'number' ? `${score}` : '—';
 }
 
-function buildScoreColorMap(responses: VacancyResponse[]): Map<number, string> {
-  const sortedUniqueScores = Array.from(
-    new Set(
-      responses
-        .map((response) => response.score)
-        .filter((score): score is number => typeof score === 'number')
-        .sort((left, right) => right - left)
-    )
-  );
+function getScoreBadgeClass(score: number | null | undefined): string {
+  if (typeof score !== 'number') return 'score-badge score-badge-neutral';
+  if (score >= 80) return 'score-badge score-badge-high';
+  if (score >= 60) return 'score-badge score-badge-medium';
+  return 'score-badge score-badge-low';
+}
 
-  const colorSteps = ['score-chip-high', 'score-chip-mid-high', 'score-chip-mid', 'score-chip-low'];
-  const map = new Map<number, string>();
+function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[number]): { text: string; matched: boolean } {
+  const criterion = item.criterion;
+  const reason = typeof item.reason === 'string' ? item.reason.toLowerCase() : '';
 
-  if (sortedUniqueScores.length === 0) {
-    return map;
+  if (criterion === 'skills') {
+    const matched = item.points > 5;
+    return {
+      matched,
+      text: matched ? `Совпали навыки (${item.points} из ${item.max_points})` : `Навыков недостаточно (${item.points} из ${item.max_points})`,
+    };
   }
 
-  sortedUniqueScores.forEach((score, index) => {
-    const percentilePosition = sortedUniqueScores.length === 1 ? 0 : index / (sortedUniqueScores.length - 1);
-    const colorIndex = Math.min(Math.floor(percentilePosition * colorSteps.length), colorSteps.length - 1);
-    map.set(score, colorSteps[colorIndex]);
-  });
+  if (criterion === 'specialization') {
+    return { matched: item.matched, text: item.matched ? 'Специализация подходит' : 'Специализация не подходит' };
+  }
 
-  return map;
-}
+  if (criterion === 'location') {
+    return { matched: item.matched, text: item.matched ? 'Локация подходит' : 'Локация не совпадает' };
+  }
 
-function getScoreColorClass(score: number | null | undefined, scoreColorMap: Map<number, string>): string {
-  if (typeof score !== 'number') return 'score-chip-neutral';
-  return scoreColorMap.get(score) ?? 'score-chip-neutral';
+  if (criterion === 'salary') {
+    return { matched: item.matched, text: item.matched ? 'Зарплата подходит' : 'Зарплата не указана или не подходит' };
+  }
+
+  if (criterion === 'experience') {
+    const matched = item.points > 0 && !reason.includes('ниже минимума') && !reason.includes('обнулен');
+    return { matched, text: matched ? 'Опыт подходит' : 'Недостаточно опыта' };
+  }
+
+  if (criterion === 'work_format') {
+    return { matched: item.matched, text: item.matched ? 'Формат работы подходит' : 'Формат работы не совпадает' };
+  }
+
+  const label = CRITERIA_LABELS[criterion] ?? 'Критерий';
+  return { matched: item.matched, text: item.matched ? `${label} подходит` : `${label} не подходит` };
 }
 
 export function VacancyDetailsPage() {
@@ -135,7 +155,8 @@ export function VacancyDetailsPage() {
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
   const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
-  const [sortMode, setSortMode] = useState<ResponsesSortMode>('score');
+  const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
+  const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -146,6 +167,21 @@ export function VacancyDetailsPage() {
   useEffect(() => {
     setResponsesPage(1);
   }, [responsesPerPage]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!perPageDropdownRef.current) return;
+      const target = event.target;
+      if (target instanceof Node && !perPageDropdownRef.current.contains(target)) {
+        setIsPerPageDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -211,12 +247,6 @@ export function VacancyDetailsPage() {
   const visibleResponses = useMemo(() => {
     const filtered = responses.filter(hasVisibleCandidateFields);
     return [...filtered].sort((left, right) => {
-      if (sortMode === 'response_date') {
-        const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
-        const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
-        return rightDate - leftDate;
-      }
-
       const leftScore = typeof left.score === 'number' ? left.score : -1;
       const rightScore = typeof right.score === 'number' ? right.score : -1;
       if (rightScore !== leftScore) {
@@ -227,9 +257,7 @@ export function VacancyDetailsPage() {
       const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
       return rightDate - leftDate;
     });
-  }, [responses, sortMode]);
-
-  const scoreColorMap = useMemo(() => buildScoreColorMap(visibleResponses), [visibleResponses]);
+  }, [responses]);
 
   if (loading) {
     return (
@@ -298,27 +326,40 @@ export function VacancyDetailsPage() {
           <h2>Отклики</h2>
 
           <div className="responses-controls">
-            <label>
-              Показывать по:{' '}
-              <select value={responsesPerPage} onChange={(event) => setResponsesPerPage(Number(event.target.value))}>
-                {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label>
-              Сортировка:{' '}
-              <select value={sortMode} onChange={(event) => setSortMode(event.target.value as ResponsesSortMode)}>
-                <option value="score">По скору</option>
-                <option value="response_date">По дате отклика</option>
-              </select>
+            <label className="control-group">
+              Показывать по:
+              <div className="custom-dropdown" ref={perPageDropdownRef}>
+                <button
+                  type="button"
+                  className="custom-dropdown-trigger"
+                  onClick={() => setIsPerPageDropdownOpen((prev) => !prev)}
+                >
+                  <span>{responsesPerPage}</span>
+                  <span className="custom-dropdown-arrow">{isPerPageDropdownOpen ? '▲' : '▼'}</span>
+                </button>
+                {isPerPageDropdownOpen ? (
+                  <ul className="custom-dropdown-menu">
+                    {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
+                      <li key={value}>
+                        <button
+                          type="button"
+                          className={`custom-dropdown-option ${value === responsesPerPage ? 'custom-dropdown-option-active' : ''}`}
+                          onClick={() => {
+                            setResponsesPerPage(value);
+                            setIsPerPageDropdownOpen(false);
+                          }}
+                        >
+                          {value}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </label>
 
             {responsesPages > 1 ? (
-              <div className="responses-pagination">
+              <div className="responses-pagination pagination">
                 <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
                   Назад
                 </button>
@@ -337,39 +378,57 @@ export function VacancyDetailsPage() {
           </div>
 
           {visibleResponses.length > 0 ? (
-            <ul className="responses-list">
+            <ul className="responses-list list">
               {visibleResponses.map((response, itemIndex) => {
                 const displayIndex = (responsesPage - 1) * responsesPerPage + itemIndex + 1;
 
                 return (
-                  <li key={response.response_id} className="response-card">
-                    <div className="response-row response-row-head">
-                      <div className="response-primary">
-                        <strong>#{displayIndex}</strong>
-                        <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
+                  <li key={response.response_id} className="candidate-card">
+                    <div className="candidate-card-header">
+                      <h3 className="candidate-name">
+                        #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
+                      </h3>
+                      <div className="score-tooltip-wrap">
+                        <span className="score-info-icon" aria-hidden="true">
+                          !
+                        </span>
+                        <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
+                        <div className="score-tooltip">
+                          <h4>Разбор совпадения</h4>
+                          {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
+                            <ul>
+                              {response.score_breakdown.map((item, idx) => {
+                                const row = buildTooltipRow(item);
+                                return (
+                                  <li key={`${response.response_id}-${item.criterion}-${idx}`}>
+                                    <span className={`match ${row.matched ? 'ok' : 'fail'}`}>{row.matched ? '✔' : '✖'}</span>
+                                    <span className="tooltip-label">{row.text}</span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          ) : (
+                            <p>Нет деталей расчета.</p>
+                          )}
+                        </div>
                       </div>
-                      <span className={`score-chip ${getScoreColorClass(response.score, scoreColorMap)}`}>{formatScoreValue(response.score)}</span>
                     </div>
-                    <div className="response-row">
-                      {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
-                      {response.status ? <span>Статус: {response.status}</span> : null}
+                    <p className="candidate-subheader">{response.resume_title ?? 'Без названия резюме'}</p>
+                    <div className="card-meta">
+                      {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : <span>Возраст: —</span>}
+                      {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : <span>Зарплата: —</span>}
+                      {response.location ? <span>Локация: {response.location}</span> : <span>Локация: —</span>}
                     </div>
-                    <div className="response-row">
-                      {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : null}
-                      {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : null}
-                      {response.location ? <span>Локация: {response.location}</span> : null}
-                      {response.response_created_at ? <span>Дата отклика: {formatDate(response.response_created_at)}</span> : null}
-                    </div>
-                    <div className="response-row">
+                    <div className="candidate-card-footer card-footer">
+                      <span className="candidate-status">Статус: {response.status || '—'}</span>
                       {response.resume_url ? (
                         <a href={response.resume_url} target="_blank" rel="noreferrer">
                           Открыть резюме
                         </a>
-                      ) : null}
-                      {response.phone ? <span>Телефон: {response.phone}</span> : null}
-                      {response.email ? <span>Email: {response.email}</span> : null}
+                      ) : (
+                        <span>Резюме недоступно</span>
+                      )}
                     </div>
-                    {response.cover_letter ? <p>Сопроводительное письмо: {response.cover_letter}</p> : null}
                   </li>
                 );
               })}
@@ -394,7 +453,7 @@ export function VacancyDetailsPage() {
           )}
 
           {responsesPages > 1 ? (
-            <div className="responses-pagination">
+            <div className="responses-pagination pagination">
               <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
                 Назад
               </button>

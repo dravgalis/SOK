@@ -350,21 +350,51 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     if seed_payload.get('_status_code') == 404:
         seed_payload = {}
 
-    direct_items, direct_pages_loaded, direct_raw_total, direct_page_counts, _ = await _fetch_negotiations_by_params(
+    raw_states, _, _ = await _discover_response_states(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
-        params={},
-        expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
+        seed_payload=seed_payload,
     )
+    fetch_states = [state for state in raw_states if state != 'any']
+    if not fetch_states:
+        fetch_states = ['any']
 
-    # Временно отключаем collections-поток для снижения нагрузки и задержек.
-    collection_items: list[dict] = []
-    collection_debug: dict[str, object] = {
-        'urls_processed': 0,
-        'pages_loaded': 0,
-        'errors': [],
-    }
+    direct_results = await asyncio.gather(
+        *[
+            _fetch_negotiations_pages(
+                client,
+                access_token=access_token,
+                vacancy_id=vacancy_id,
+                state=state,
+                expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
+            )
+            for state in fetch_states
+        ],
+        return_exceptions=True,
+    )
+    direct_items: list[dict] = []
+    direct_pages_loaded = 0
+    direct_raw_total = 0
+    direct_page_counts: list[dict[str, int]] = []
+    state_fetch_errors: list[str] = []
+    for state, result in zip(fetch_states, direct_results, strict=False):
+        if isinstance(result, Exception):
+            state_fetch_errors.append(f'{state}: {result}')
+            continue
+        state_items, pages_loaded, raw_total, page_counts, _ = result
+        direct_items.extend(state_items)
+        direct_pages_loaded += pages_loaded
+        if isinstance(raw_total, int):
+            direct_raw_total += raw_total
+        direct_page_counts.extend(page_counts)
+
+    collection_items, collection_debug = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        payload=seed_payload,
+    )
 
     merged_raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
@@ -378,9 +408,6 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
                 continue
             seen_raw_keys.add(raw_key)
             merged_raw_items.append(item)
-
-    if len(merged_raw_items) > 50:
-        merged_raw_items = merged_raw_items[:50]
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -454,6 +481,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'collection_errors': collection_errors,
             'collection_errors_count': collection_errors_count,
             'collection_has_candidates': collection_has_candidates,
+            'state_fetch_errors': state_fetch_errors,
+            'states_processed': fetch_states,
             'duplicates_skipped': duplicates_skipped + duplicate_items,
             'missing_items': max(hh_total - loaded_count, 0),
             'summary_total': summary_total,
@@ -787,13 +816,12 @@ async def _fetch_negotiations_by_params(
     params: dict[str, str],
     expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
-    per_page = 200
+    per_page = 50
     items: list[dict] = []
     raw_total: int | None = None
     page_counts: list[dict[str, int]] = []
     raw_ids: list[str] = []
     normalized_params = dict(params)
-    normalized_params['status'] = 'any'
 
     first_payload = await _hh_get(
         client,
@@ -825,7 +853,6 @@ async def _fetch_negotiations_by_params(
     max_pages_hint = max(
         value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
     ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else 1
-    max_pages_hint = min(max_pages_hint, 5)
 
     if max_pages_hint > 1:
         page_tasks = [
@@ -972,7 +999,7 @@ async def _fetch_single_collection_path(
     collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
     collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
 
-    per_page = 200
+    per_page = 50
     base_path = path.split('?', 1)[0]
     base_params = {
         **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
@@ -1590,6 +1617,7 @@ def _score_candidate_against_vacancy(
     breakdown: list[dict[str, object]] = []
     total_weight = 0
     earned_weight = 0.0
+    specialization_match_ratio: float | None = None
 
     for criterion, config in vacancy_criteria.items():
         weight = criterion_weights.get(criterion, 5)
@@ -1608,8 +1636,47 @@ def _score_candidate_against_vacancy(
             expected=expected,
             candidate_profile=candidate_profile,
         )
-        points = round(weight * match_ratio, 2)
-        total_weight += weight
+        if criterion == 'specialization':
+            specialization_match_ratio = match_ratio
+        if criterion == 'experience' and specialization_match_ratio is None and 'specialization' in vacancy_criteria:
+            specialization_config = vacancy_criteria.get('specialization', {})
+            specialization_expected = (
+                specialization_config.get('expected') if isinstance(specialization_config, dict) else None
+            )
+            specialization_compare_mode = (
+                specialization_config.get('compare_mode')
+                if isinstance(specialization_config, dict) and isinstance(specialization_config.get('compare_mode'), str)
+                else 'token_overlap'
+            )
+            if specialization_expected:
+                specialization_match_ratio, _ = _match_criterion(
+                    criterion='specialization',
+                    compare_mode=specialization_compare_mode,
+                    expected=specialization_expected,
+                    candidate_profile=candidate_profile,
+                )
+        if criterion == 'experience' and isinstance(specialization_match_ratio, float) and specialization_match_ratio < 0.5:
+            match_ratio = 0.0
+            reason = (
+                'Опыт обнулен: совпадение по специализации ниже 0.5 '
+                f'({round(specialization_match_ratio, 3)}).'
+            )
+        criterion_max_points: float = float(weight)
+        if criterion == 'experience' and compare_mode == 'experience_range' and isinstance(expected, dict):
+            experience_points, experience_reason = _calculate_experience_points(
+                expected=expected,
+                candidate_profile=candidate_profile,
+                weight=weight,
+                specialization_match_ratio=specialization_match_ratio,
+            )
+            criterion_max_points = 35.0
+            points = float(experience_points)
+            match_ratio = points / criterion_max_points if criterion_max_points > 0 else 0.0
+            reason = experience_reason
+        else:
+            points = round(weight * match_ratio, 2)
+
+        total_weight += int(round(criterion_max_points))
         earned_weight += points
 
         breakdown.append(
@@ -1619,7 +1686,7 @@ def _score_candidate_against_vacancy(
                 'importance': importance,
                 'weight': weight,
                 'points': points,
-                'max_points': weight,
+                'max_points': int(round(criterion_max_points)),
                 'matched': match_ratio >= 0.99,
                 'match_ratio': round(match_ratio, 3),
                 'reason': reason,
@@ -1706,8 +1773,12 @@ def _match_criterion(
     candidate_profile: dict[str, object],
 ) -> tuple[float, str]:
     if compare_mode == 'token_overlap':
-        expected_tokens = _normalize_tokens(_as_string_list(expected))
-        candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get(criterion)))
+        if criterion == 'skills':
+            expected_tokens = _normalize_skill_tokens(_as_string_list(expected))
+            candidate_tokens = _normalize_skill_tokens(_as_string_list(candidate_profile.get(criterion)))
+        else:
+            expected_tokens = _normalize_tokens(_as_string_list(expected))
+            candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get(criterion)))
         if not expected_tokens:
             return 0.0, 'Критерий вакансии не заполнен.'
         if not candidate_tokens:
@@ -1755,14 +1826,23 @@ def _match_criterion(
 
         if isinstance(min_months, int) and candidate_months < min_months:
             return 0.0, f'Опыт кандидата {candidate_months} мес., требуется от {min_months} мес. ({experience_label}).'
-        if isinstance(max_months, int) and candidate_months > max_months:
-            return 0.7, f'Опыт кандидата {candidate_months} мес., выше диапазона до {max_months} мес. ({experience_label}).'
-        if isinstance(min_months, int) or isinstance(max_months, int):
-            if isinstance(min_months, int) and isinstance(max_months, int):
-                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует {min_months}–{max_months} мес.'
-            if isinstance(min_months, int):
-                return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует от {min_months} мес.'
-            return 1.0, f'Опыт кандидата {candidate_months} мес., вакансия требует до {max_months} мес.'
+        if isinstance(max_months, int) and max_months > 0:
+            score = min(candidate_months / max_months, 1.3)
+            if candidate_months > max_months:
+                return score, (
+                    f'Опыт кандидата {candidate_months} мес., выше верхней границы {max_months} мес. '
+                    f'Бонус применен, score={round(score, 3)}.'
+                )
+            return score, (
+                f'Опыт кандидата {candidate_months} мес., пропорциональный score={round(score, 3)} '
+                f'при верхней границе {max_months} мес.'
+            )
+        if isinstance(min_months, int) and min_months > 0:
+            score = min(candidate_months / min_months, 1.3)
+            return score, (
+                f'Опыт кандидата {candidate_months} мес., score={round(score, 3)} '
+                f'относительно минимальной границы {min_months} мес.'
+            )
 
         candidate_text_tokens = _normalize_tokens(_as_string_list(candidate_profile.get('experience')))
         expected_tokens = _normalize_tokens([experience_label])
@@ -1786,6 +1866,47 @@ def _match_criterion(
         return matched / len(expected), f'Совпало {matched} из {len(expected)} текстовых требований.'
 
     return 0.0, 'Нет логики сравнения для критерия.'
+
+
+def _calculate_experience_points(
+    *,
+    expected: dict[str, object],
+    candidate_profile: dict[str, object],
+    weight: int,
+    specialization_match_ratio: float | None,
+) -> tuple[int, str]:
+    if isinstance(specialization_match_ratio, float) and specialization_match_ratio < 0.5:
+        return 0, (
+            'Опыт обнулен: совпадение по специализации ниже 0.5 '
+            f'({round(specialization_match_ratio, 3)}).'
+        )
+
+    candidate_months = candidate_profile.get('total_experience_months')
+    if not isinstance(candidate_months, int):
+        return 0, 'Не удалось определить суммарный опыт кандидата.'
+
+    min_months = expected.get('min_months')
+    max_months = expected.get('max_months')
+    has_min = isinstance(min_months, int) and min_months >= 0
+    has_max = isinstance(max_months, int) and max_months > 0
+
+    if has_min and candidate_months < int(min_months):
+        return 0, f'Опыт кандидата {candidate_months} мес. ниже минимума {min_months} мес.'
+
+    max_base = int(max_months) if has_max else int(min_months) if has_min and int(min_months) > 0 else max(candidate_months, 1)
+    raw_ratio = candidate_months / max(max_base, 1)
+    ratio = min(raw_ratio, 1.45)
+    base_points = int(round(weight * ratio))
+
+    bonus = 0
+    if has_max and candidate_months > int(max_months):
+        bonus = min(max((candidate_months - int(max_months)) // 12, 0), 2)
+
+    points = min(base_points + bonus, 35)
+    return points, (
+        f'Опыт {candidate_months} мес.: ratio={round(ratio, 3)} '
+        f'(база={base_points}, bonus={bonus}, cap=35, max_base={max_base}).'
+    )
 
 
 def _extract_names_from_list(values: list[object]) -> list[str]:
@@ -1977,6 +2098,61 @@ def _normalize_tokens(values: list[str]) -> set[str]:
         if normalized:
             tokens.add(normalized)
     return tokens
+
+
+def _normalize_skill_tokens(values: list[str]) -> set[str]:
+    canonical_tokens: set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        for chunk in re.split(r'[,\s]+', normalized):
+            if not chunk:
+                continue
+            canonical = _canonicalize_skill_token(chunk)
+            if canonical:
+                canonical_tokens.add(canonical)
+    return canonical_tokens
+
+
+def _canonicalize_skill_token(token: str) -> str:
+    synonyms = {
+        'js': 'javascript',
+        'javascript': 'javascript',
+        'жаваскрипт': 'javascript',
+        'джаваскрипт': 'javascript',
+        'ts': 'typescript',
+        'typescript': 'typescript',
+        'тайпскрипт': 'typescript',
+        'py': 'python',
+        'python': 'python',
+        'питон': 'python',
+        'postgres': 'postgresql',
+        'postgresql': 'postgresql',
+        'постгрес': 'postgresql',
+        'постгресql': 'postgresql',
+        'postgresql': 'postgresql',
+        'csharp': 'c#',
+        'c#': 'c#',
+        'с#': 'c#',
+        'dotnet': '.net',
+        '.net': '.net',
+        'net': '.net',
+        'node': 'nodejs',
+        'nodejs': 'nodejs',
+        'node.js': 'nodejs',
+        'нода': 'nodejs',
+        'reactjs': 'react',
+        'react': 'react',
+        'реакт': 'react',
+        'vuejs': 'vue',
+        'vue': 'vue',
+        'вью': 'vue',
+        'sql': 'sql',
+        'эс кью эл': 'sql',
+    }
+    normalized = token.strip().replace('.', '').replace('_', '').replace('-', '')
+    return synonyms.get(normalized, normalized)
 
 
 def _response_sort_key(item: dict[str, object | None]) -> tuple[int, int, str]:
