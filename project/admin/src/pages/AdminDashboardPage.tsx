@@ -24,6 +24,9 @@ export function AdminDashboardPage() {
         setError('');
         const response = await fetch(ADMIN_API.usersCount, {
           method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          },
           credentials: 'include',
         });
 
