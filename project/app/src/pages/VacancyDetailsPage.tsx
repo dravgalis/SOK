@@ -175,7 +175,6 @@ export function VacancyDetailsPage() {
   });
   const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
   const [activeTooltipId, setActiveTooltipId] = useState<string | null>(null);
-  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
   const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,6 +206,29 @@ export function VacancyDetailsPage() {
       document.removeEventListener('mousedown', handleOutsideClick);
     };
   }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!activeTooltipId) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest(`[data-tooltip-wrap-id="${activeTooltipId}"]`)) return;
+      setActiveTooltipId(null);
+    };
+
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveTooltipId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [activeTooltipId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -453,14 +475,20 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <div
-                        className="score-tooltip-wrap"
-                      >
-                        <button type="button" className="score-info-icon" aria-label="Показать разбор совпадения">
+                      <div className="score-tooltip-wrap" data-tooltip-wrap-id={response.response_id}>
+                        <button
+                          type="button"
+                          className="score-info-icon"
+                          aria-label="Показать разбор совпадения"
+                          aria-expanded={activeTooltipId === response.response_id}
+                          onClick={() =>
+                            setActiveTooltipId((prev) => (prev === response.response_id ? null : response.response_id))
+                          }
+                        >
                           !
                         </button>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div className="score-tooltip" role="tooltip">
+                        <div className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`} role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
