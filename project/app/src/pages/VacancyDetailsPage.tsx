@@ -122,7 +122,13 @@ function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[n
   }
 
   if (criterion === 'specialization') {
-    return { matched: item.matched, text: item.matched ? 'Специализация подходит' : 'Специализация не подходит' };
+    if (item.matched) {
+      return { matched: true, text: 'Специализация подходит (точное совпадение)' };
+    }
+    if (item.points > 0) {
+      return { matched: false, text: `Специализация частично совпадает (${item.points} из ${item.max_points})` };
+    }
+    return { matched: false, text: 'Специализация не подходит' };
   }
 
   if (criterion === 'location') {
@@ -168,6 +174,7 @@ export function VacancyDetailsPage() {
       : DEFAULT_RESPONSES_PER_PAGE;
   });
   const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
+  const [activeTooltipId, setActiveTooltipId] = useState<string | null>(null);
   const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -198,6 +205,29 @@ export function VacancyDetailsPage() {
       document.removeEventListener('mousedown', handleOutsideClick);
     };
   }, []);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!activeTooltipId) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.score-tooltip-wrap')) return;
+      setActiveTooltipId(null);
+    };
+
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setActiveTooltipId(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEsc);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEsc);
+    };
+  }, [activeTooltipId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -405,17 +435,27 @@ export function VacancyDetailsPage() {
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
                       <div className="score-tooltip-wrap">
-                        <span className="score-info-icon" aria-hidden="true">
+                        <button
+                          type="button"
+                          className="score-info-icon"
+                          aria-label="Показать разбор совпадения"
+                          aria-expanded={activeTooltipId === response.response_id}
+                          onClick={() =>
+                            setActiveTooltipId((prev) => (prev === response.response_id ? null : response.response_id))
+                          }
+                        >
                           !
-                        </span>
+                        </button>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
-                        <div className="score-tooltip">
+                        <div className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`} role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
                               {response.score_breakdown.map((item, idx) => {
                                 const row = buildTooltipRow(item);
-                                const isPartial = item.criterion === 'location' && row.text.includes('удалённая работа');
+                                const isPartial =
+                                  (item.criterion === 'location' && row.text.includes('удалённая работа')) ||
+                                  (item.criterion === 'specialization' && item.points > 0 && !item.matched);
                                 const icon = isPartial ? '~' : row.matched ? '✔' : '✖';
                                 const iconClass = isPartial ? 'match partial' : row.matched ? 'match ok' : 'match fail';
                                 return (
