@@ -8,7 +8,7 @@ export function AppRouter() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path={APP_ROUTES.login} element={<LoginPage />} />
+        <Route path="/" element={<LoginPage />} />
         <Route path={APP_ROUTES.app} element={<DashboardPage />} />
         <Route path={APP_ROUTES.vacancyDetails} element={<VacancyDetailsPage />} />
         <Route path="*" element={<Navigate to={APP_ROUTES.login} replace />} />
