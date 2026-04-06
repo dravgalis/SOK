@@ -1661,8 +1661,22 @@ def _score_candidate_against_vacancy(
                 'Опыт обнулен: совпадение по специализации ниже 0.5 '
                 f'({round(specialization_match_ratio, 3)}).'
             )
-        points = round(weight * match_ratio, 2)
-        total_weight += weight
+        criterion_max_points: float = float(weight)
+        if criterion == 'experience' and compare_mode == 'experience_range' and isinstance(expected, dict):
+            experience_points, experience_reason = _calculate_experience_points(
+                expected=expected,
+                candidate_profile=candidate_profile,
+                weight=weight,
+                specialization_match_ratio=specialization_match_ratio,
+            )
+            criterion_max_points = 35.0
+            points = float(experience_points)
+            match_ratio = points / criterion_max_points if criterion_max_points > 0 else 0.0
+            reason = experience_reason
+        else:
+            points = round(weight * match_ratio, 2)
+
+        total_weight += int(round(criterion_max_points))
         earned_weight += points
 
         breakdown.append(
@@ -1672,7 +1686,7 @@ def _score_candidate_against_vacancy(
                 'importance': importance,
                 'weight': weight,
                 'points': points,
-                'max_points': weight,
+                'max_points': int(round(criterion_max_points)),
                 'matched': match_ratio >= 0.99,
                 'match_ratio': round(match_ratio, 3),
                 'reason': reason,
@@ -1759,8 +1773,12 @@ def _match_criterion(
     candidate_profile: dict[str, object],
 ) -> tuple[float, str]:
     if compare_mode == 'token_overlap':
-        expected_tokens = _normalize_tokens(_as_string_list(expected))
-        candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get(criterion)))
+        if criterion == 'skills':
+            expected_tokens = _normalize_skill_tokens(_as_string_list(expected))
+            candidate_tokens = _normalize_skill_tokens(_as_string_list(candidate_profile.get(criterion)))
+        else:
+            expected_tokens = _normalize_tokens(_as_string_list(expected))
+            candidate_tokens = _normalize_tokens(_as_string_list(candidate_profile.get(criterion)))
         if not expected_tokens:
             return 0.0, 'Критерий вакансии не заполнен.'
         if not candidate_tokens:
@@ -1848,6 +1866,47 @@ def _match_criterion(
         return matched / len(expected), f'Совпало {matched} из {len(expected)} текстовых требований.'
 
     return 0.0, 'Нет логики сравнения для критерия.'
+
+
+def _calculate_experience_points(
+    *,
+    expected: dict[str, object],
+    candidate_profile: dict[str, object],
+    weight: int,
+    specialization_match_ratio: float | None,
+) -> tuple[int, str]:
+    if isinstance(specialization_match_ratio, float) and specialization_match_ratio < 0.5:
+        return 0, (
+            'Опыт обнулен: совпадение по специализации ниже 0.5 '
+            f'({round(specialization_match_ratio, 3)}).'
+        )
+
+    candidate_months = candidate_profile.get('total_experience_months')
+    if not isinstance(candidate_months, int):
+        return 0, 'Не удалось определить суммарный опыт кандидата.'
+
+    min_months = expected.get('min_months')
+    max_months = expected.get('max_months')
+    has_min = isinstance(min_months, int) and min_months >= 0
+    has_max = isinstance(max_months, int) and max_months > 0
+
+    if has_min and candidate_months < int(min_months):
+        return 0, f'Опыт кандидата {candidate_months} мес. ниже минимума {min_months} мес.'
+
+    max_base = int(max_months) if has_max else int(min_months) if has_min and int(min_months) > 0 else max(candidate_months, 1)
+    raw_ratio = candidate_months / max(max_base, 1)
+    ratio = min(raw_ratio, 1.45)
+    base_points = int(round(weight * ratio))
+
+    bonus = 0
+    if has_max and candidate_months > int(max_months):
+        bonus = min(max((candidate_months - int(max_months)) // 12, 0), 2)
+
+    points = min(base_points + bonus, 35)
+    return points, (
+        f'Опыт {candidate_months} мес.: ratio={round(ratio, 3)} '
+        f'(база={base_points}, bonus={bonus}, cap=35, max_base={max_base}).'
+    )
 
 
 def _extract_names_from_list(values: list[object]) -> list[str]:
@@ -2039,6 +2098,61 @@ def _normalize_tokens(values: list[str]) -> set[str]:
         if normalized:
             tokens.add(normalized)
     return tokens
+
+
+def _normalize_skill_tokens(values: list[str]) -> set[str]:
+    canonical_tokens: set[str] = set()
+    for value in values:
+        normalized = _normalize_text(value)
+        if not normalized:
+            continue
+        for chunk in re.split(r'[,\s]+', normalized):
+            if not chunk:
+                continue
+            canonical = _canonicalize_skill_token(chunk)
+            if canonical:
+                canonical_tokens.add(canonical)
+    return canonical_tokens
+
+
+def _canonicalize_skill_token(token: str) -> str:
+    synonyms = {
+        'js': 'javascript',
+        'javascript': 'javascript',
+        'жаваскрипт': 'javascript',
+        'джаваскрипт': 'javascript',
+        'ts': 'typescript',
+        'typescript': 'typescript',
+        'тайпскрипт': 'typescript',
+        'py': 'python',
+        'python': 'python',
+        'питон': 'python',
+        'postgres': 'postgresql',
+        'postgresql': 'postgresql',
+        'постгрес': 'postgresql',
+        'постгресql': 'postgresql',
+        'postgresql': 'postgresql',
+        'csharp': 'c#',
+        'c#': 'c#',
+        'с#': 'c#',
+        'dotnet': '.net',
+        '.net': '.net',
+        'net': '.net',
+        'node': 'nodejs',
+        'nodejs': 'nodejs',
+        'node.js': 'nodejs',
+        'нода': 'nodejs',
+        'reactjs': 'react',
+        'react': 'react',
+        'реакт': 'react',
+        'vuejs': 'vue',
+        'vue': 'vue',
+        'вью': 'vue',
+        'sql': 'sql',
+        'эс кью эл': 'sql',
+    }
+    normalized = token.strip().replace('.', '').replace('_', '').replace('-', '')
+    return synonyms.get(normalized, normalized)
 
 
 def _response_sort_key(item: dict[str, object | None]) -> tuple[int, int, str]:
