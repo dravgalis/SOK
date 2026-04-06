@@ -92,38 +92,14 @@ function hasVisibleCandidateFields(response: VacancyResponse): boolean {
 }
 
 function formatScoreValue(score?: number | null): string {
-  return typeof score === 'number' ? `Score: ${score}` : 'Score: —';
+  return typeof score === 'number' ? `${score}` : '—';
 }
 
-function buildScoreColorMap(responses: VacancyResponse[]): Map<number, string> {
-  const sortedUniqueScores = Array.from(
-    new Set(
-      responses
-        .map((response) => response.score)
-        .filter((score): score is number => typeof score === 'number')
-        .sort((left, right) => right - left)
-    )
-  );
-
-  const colorSteps = ['score-chip-high', 'score-chip-mid-high', 'score-chip-mid', 'score-chip-low'];
-  const map = new Map<number, string>();
-
-  if (sortedUniqueScores.length === 0) {
-    return map;
-  }
-
-  sortedUniqueScores.forEach((score, index) => {
-    const percentilePosition = sortedUniqueScores.length === 1 ? 0 : index / (sortedUniqueScores.length - 1);
-    const colorIndex = Math.min(Math.floor(percentilePosition * colorSteps.length), colorSteps.length - 1);
-    map.set(score, colorSteps[colorIndex]);
-  });
-
-  return map;
-}
-
-function getScoreColorClass(score: number | null | undefined, scoreColorMap: Map<number, string>): string {
-  if (typeof score !== 'number') return 'score-chip-neutral';
-  return scoreColorMap.get(score) ?? 'score-chip-neutral';
+function getScoreBadgeClass(score: number | null | undefined): string {
+  if (typeof score !== 'number') return 'score-badge score-badge-neutral';
+  if (score >= 80) return 'score-badge score-badge-high';
+  if (score >= 60) return 'score-badge score-badge-medium';
+  return 'score-badge score-badge-low';
 }
 
 export function VacancyDetailsPage() {
@@ -229,8 +205,6 @@ export function VacancyDetailsPage() {
     });
   }, [responses, sortMode]);
 
-  const scoreColorMap = useMemo(() => buildScoreColorMap(visibleResponses), [visibleResponses]);
-
   if (loading) {
     return (
       <main className="page page-top">
@@ -298,7 +272,7 @@ export function VacancyDetailsPage() {
           <h2>Отклики</h2>
 
           <div className="responses-controls">
-            <label>
+            <label className="control-group">
               Показывать по:{' '}
               <select value={responsesPerPage} onChange={(event) => setResponsesPerPage(Number(event.target.value))}>
                 {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
@@ -309,7 +283,7 @@ export function VacancyDetailsPage() {
               </select>
             </label>
 
-            <label>
+            <label className="control-group">
               Сортировка:{' '}
               <select value={sortMode} onChange={(event) => setSortMode(event.target.value as ResponsesSortMode)}>
                 <option value="score">По скору</option>
@@ -318,7 +292,7 @@ export function VacancyDetailsPage() {
             </label>
 
             {responsesPages > 1 ? (
-              <div className="responses-pagination">
+              <div className="responses-pagination pagination">
                 <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
                   Назад
                 </button>
@@ -337,39 +311,34 @@ export function VacancyDetailsPage() {
           </div>
 
           {visibleResponses.length > 0 ? (
-            <ul className="responses-list">
+            <ul className="responses-list list">
               {visibleResponses.map((response, itemIndex) => {
                 const displayIndex = (responsesPage - 1) * responsesPerPage + itemIndex + 1;
 
                 return (
-                  <li key={response.response_id} className="response-card">
-                    <div className="response-row response-row-head">
-                      <div className="response-primary">
-                        <strong>#{displayIndex}</strong>
-                        <strong>{response.candidate_name ?? 'Кандидат без имени'}</strong>
-                      </div>
-                      <span className={`score-chip ${getScoreColorClass(response.score, scoreColorMap)}`}>{formatScoreValue(response.score)}</span>
+                  <li key={response.response_id} className="candidate-card">
+                    <div className="candidate-card-header">
+                      <h3 className="candidate-name">
+                        #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
+                      </h3>
+                      <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
                     </div>
-                    <div className="response-row">
-                      {response.resume_title ? <span>Резюме: {response.resume_title}</span> : null}
-                      {response.status ? <span>Статус: {response.status}</span> : null}
+                    <p className="candidate-subheader">{response.resume_title ?? 'Без названия резюме'}</p>
+                    <div className="card-meta">
+                      {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : <span>Возраст: —</span>}
+                      {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : <span>Зарплата: —</span>}
+                      {response.location ? <span>Локация: {response.location}</span> : <span>Локация: —</span>}
                     </div>
-                    <div className="response-row">
-                      {typeof response.age === 'number' ? <span>Возраст: {response.age}</span> : null}
-                      {response.expected_salary ? <span>Зарплата: {response.expected_salary}</span> : null}
-                      {response.location ? <span>Локация: {response.location}</span> : null}
-                      {response.response_created_at ? <span>Дата отклика: {formatDate(response.response_created_at)}</span> : null}
-                    </div>
-                    <div className="response-row">
+                    <div className="candidate-card-footer card-footer">
+                      <span className="candidate-status">Статус: {response.status || '—'}</span>
                       {response.resume_url ? (
                         <a href={response.resume_url} target="_blank" rel="noreferrer">
                           Открыть резюме
                         </a>
-                      ) : null}
-                      {response.phone ? <span>Телефон: {response.phone}</span> : null}
-                      {response.email ? <span>Email: {response.email}</span> : null}
+                      ) : (
+                        <span>Резюме недоступно</span>
+                      )}
                     </div>
-                    {response.cover_letter ? <p>Сопроводительное письмо: {response.cover_letter}</p> : null}
                   </li>
                 );
               })}
@@ -394,7 +363,7 @@ export function VacancyDetailsPage() {
           )}
 
           {responsesPages > 1 ? (
-            <div className="responses-pagination">
+            <div className="responses-pagination pagination">
               <button type="button" disabled={responsesPage <= 1} onClick={() => setResponsesPage((prev) => Math.max(prev - 1, 1))}>
                 Назад
               </button>
