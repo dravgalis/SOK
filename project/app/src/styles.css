@@ -488,7 +488,6 @@ p {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  isolation: isolate;
 }
 
 .score-info-icon {
