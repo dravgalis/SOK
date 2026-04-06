@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { APP_ENDPOINTS } from '../config';
 
@@ -58,7 +58,6 @@ type VacancyResponsesPayload = {
 
 const DEFAULT_RESPONSES_PER_PAGE = 25;
 const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50, 100, 200] as const;
-type ResponsesSortMode = 'score' | 'response_date';
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -111,7 +110,8 @@ export function VacancyDetailsPage() {
   const [responsesPages, setResponsesPages] = useState(1);
   const [responsesCount, setResponsesCount] = useState(0);
   const [responsesPerPage, setResponsesPerPage] = useState<number>(DEFAULT_RESPONSES_PER_PAGE);
-  const [sortMode, setSortMode] = useState<ResponsesSortMode>('score');
+  const [isPerPageDropdownOpen, setIsPerPageDropdownOpen] = useState(false);
+  const perPageDropdownRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -122,6 +122,21 @@ export function VacancyDetailsPage() {
   useEffect(() => {
     setResponsesPage(1);
   }, [responsesPerPage]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (!perPageDropdownRef.current) return;
+      const target = event.target;
+      if (target instanceof Node && !perPageDropdownRef.current.contains(target)) {
+        setIsPerPageDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
@@ -187,12 +202,6 @@ export function VacancyDetailsPage() {
   const visibleResponses = useMemo(() => {
     const filtered = responses.filter(hasVisibleCandidateFields);
     return [...filtered].sort((left, right) => {
-      if (sortMode === 'response_date') {
-        const leftDate = left.response_created_at ? new Date(left.response_created_at).getTime() : 0;
-        const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
-        return rightDate - leftDate;
-      }
-
       const leftScore = typeof left.score === 'number' ? left.score : -1;
       const rightScore = typeof right.score === 'number' ? right.score : -1;
       if (rightScore !== leftScore) {
@@ -203,7 +212,7 @@ export function VacancyDetailsPage() {
       const rightDate = right.response_created_at ? new Date(right.response_created_at).getTime() : 0;
       return rightDate - leftDate;
     });
-  }, [responses, sortMode]);
+  }, [responses]);
 
   if (loading) {
     return (
@@ -273,22 +282,35 @@ export function VacancyDetailsPage() {
 
           <div className="responses-controls">
             <label className="control-group">
-              Показывать по:{' '}
-              <select value={responsesPerPage} onChange={(event) => setResponsesPerPage(Number(event.target.value))}>
-                {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="control-group">
-              Сортировка:{' '}
-              <select value={sortMode} onChange={(event) => setSortMode(event.target.value as ResponsesSortMode)}>
-                <option value="score">По скору</option>
-                <option value="response_date">По дате отклика</option>
-              </select>
+              Показывать по:
+              <div className="custom-dropdown" ref={perPageDropdownRef}>
+                <button
+                  type="button"
+                  className="custom-dropdown-trigger"
+                  onClick={() => setIsPerPageDropdownOpen((prev) => !prev)}
+                >
+                  <span>{responsesPerPage}</span>
+                  <span className="custom-dropdown-arrow">{isPerPageDropdownOpen ? '▲' : '▼'}</span>
+                </button>
+                {isPerPageDropdownOpen ? (
+                  <ul className="custom-dropdown-menu">
+                    {RESPONSES_PER_PAGE_OPTIONS.map((value) => (
+                      <li key={value}>
+                        <button
+                          type="button"
+                          className={`custom-dropdown-option ${value === responsesPerPage ? 'custom-dropdown-option-active' : ''}`}
+                          onClick={() => {
+                            setResponsesPerPage(value);
+                            setIsPerPageDropdownOpen(false);
+                          }}
+                        >
+                          {value}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </label>
 
             {responsesPages > 1 ? (
@@ -321,7 +343,31 @@ export function VacancyDetailsPage() {
                       <h3 className="candidate-name">
                         #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
                       </h3>
-                      <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
+                      <div className="score-tooltip-wrap">
+                        <span className="score-info-icon" aria-hidden="true">
+                          !
+                        </span>
+                        <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
+                        <div className="score-tooltip">
+                          <h4>Разбор скора</h4>
+                          {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
+                            <ul>
+                              {response.score_breakdown.map((item, idx) => (
+                                <li key={`${response.response_id}-${item.criterion}-${idx}`}>
+                                  <span className={item.matched ? 'tooltip-icon tooltip-icon-match' : 'tooltip-icon tooltip-icon-miss'}>
+                                    {item.matched ? '✔' : '✖'}
+                                  </span>
+                                  <span className="tooltip-label">
+                                    {item.criterion}: {item.points}/{item.max_points}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>Нет деталей расчета.</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     <p className="candidate-subheader">{response.resume_title ?? 'Без названия резюме'}</p>
                     <div className="card-meta">
