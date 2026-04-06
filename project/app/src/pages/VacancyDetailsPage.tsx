@@ -58,6 +58,14 @@ type VacancyResponsesPayload = {
 
 const DEFAULT_RESPONSES_PER_PAGE = 25;
 const RESPONSES_PER_PAGE_OPTIONS = [10, 25, 50, 100, 200] as const;
+const CRITERIA_LABELS: Record<string, string> = {
+  skills: 'Навыки',
+  specialization: 'Специализация',
+  location: 'Локация',
+  salary: 'Зарплата',
+  experience: 'Опыт',
+  work_format: 'Формат работы',
+};
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -99,6 +107,43 @@ function getScoreBadgeClass(score: number | null | undefined): string {
   if (score >= 80) return 'score-badge score-badge-high';
   if (score >= 60) return 'score-badge score-badge-medium';
   return 'score-badge score-badge-low';
+}
+
+function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[number]): { text: string; matched: boolean } {
+  const criterion = item.criterion;
+  const reason = typeof item.reason === 'string' ? item.reason.toLowerCase() : '';
+
+  if (criterion === 'skills') {
+    const matched = item.points > 5;
+    return {
+      matched,
+      text: matched ? `Совпали навыки (${item.points} из ${item.max_points})` : `Навыков недостаточно (${item.points} из ${item.max_points})`,
+    };
+  }
+
+  if (criterion === 'specialization') {
+    return { matched: item.matched, text: item.matched ? 'Специализация подходит' : 'Специализация не подходит' };
+  }
+
+  if (criterion === 'location') {
+    return { matched: item.matched, text: item.matched ? 'Локация подходит' : 'Локация не совпадает' };
+  }
+
+  if (criterion === 'salary') {
+    return { matched: item.matched, text: item.matched ? 'Зарплата подходит' : 'Зарплата не указана или не подходит' };
+  }
+
+  if (criterion === 'experience') {
+    const matched = item.points > 0 && !reason.includes('ниже минимума') && !reason.includes('обнулен');
+    return { matched, text: matched ? 'Опыт подходит' : 'Недостаточно опыта' };
+  }
+
+  if (criterion === 'work_format') {
+    return { matched: item.matched, text: item.matched ? 'Формат работы подходит' : 'Формат работы не совпадает' };
+  }
+
+  const label = CRITERIA_LABELS[criterion] ?? 'Критерий';
+  return { matched: item.matched, text: item.matched ? `${label} подходит` : `${label} не подходит` };
 }
 
 export function VacancyDetailsPage() {
@@ -349,19 +394,18 @@ export function VacancyDetailsPage() {
                         </span>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
                         <div className="score-tooltip">
-                          <h4>Разбор скора</h4>
+                          <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
-                              {response.score_breakdown.map((item, idx) => (
-                                <li key={`${response.response_id}-${item.criterion}-${idx}`}>
-                                  <span className={item.matched ? 'tooltip-icon tooltip-icon-match' : 'tooltip-icon tooltip-icon-miss'}>
-                                    {item.matched ? '✔' : '✖'}
-                                  </span>
-                                  <span className="tooltip-label">
-                                    {item.criterion}: {item.points}/{item.max_points}
-                                  </span>
-                                </li>
-                              ))}
+                              {response.score_breakdown.map((item, idx) => {
+                                const row = buildTooltipRow(item);
+                                return (
+                                  <li key={`${response.response_id}-${item.criterion}-${idx}`}>
+                                    <span className={`match ${row.matched ? 'ok' : 'fail'}`}>{row.matched ? '✔' : '✖'}</span>
+                                    <span className="tooltip-label">{row.text}</span>
+                                  </li>
+                                );
+                              })}
                             </ul>
                           ) : (
                             <p>Нет деталей расчета.</p>

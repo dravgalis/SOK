@@ -318,6 +318,7 @@ p {
 .responses-section {
   display: grid;
   gap: 14px;
+  overflow: visible;
 }
 
 .responses-controls {
@@ -410,6 +411,7 @@ p {
   transition: all 0.2s ease;
   display: grid;
   gap: 12px;
+  overflow: visible;
 }
 
 .candidate-card:hover {
@@ -422,6 +424,7 @@ p {
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+  overflow: visible;
 }
 
 .candidate-name {
@@ -503,10 +506,10 @@ p {
 .score-tooltip {
   position: absolute;
   right: 0;
-  top: calc(100% + 8px);
-  width: 280px;
+  top: 130%;
+  width: 260px;
   padding: 12px;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--card);
   box-shadow: var(--shadow-card);
@@ -514,7 +517,7 @@ p {
   visibility: hidden;
   transform: translateY(4px);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
-  z-index: 25;
+  z-index: 9999;
 }
 
 .score-tooltip-wrap:hover .score-tooltip {
@@ -549,17 +552,17 @@ p {
   align-items: flex-start;
 }
 
-.tooltip-icon {
+.match {
   font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
 }
 
-.tooltip-icon-match {
+.match.ok {
   color: var(--accent);
 }
 
-.tooltip-icon-miss {
+.match.fail {
   color: var(--text-danger);
 }
 
