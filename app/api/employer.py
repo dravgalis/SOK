@@ -350,21 +350,51 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
     if seed_payload.get('_status_code') == 404:
         seed_payload = {}
 
-    direct_items, direct_pages_loaded, direct_raw_total, direct_page_counts, _ = await _fetch_negotiations_by_params(
+    raw_states, _, _ = await _discover_response_states(
         client,
         access_token=access_token,
         vacancy_id=vacancy_id,
-        params={},
-        expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
+        seed_payload=seed_payload,
     )
+    fetch_states = [state for state in raw_states if state != 'any']
+    if not fetch_states:
+        fetch_states = ['any']
 
-    # Временно отключаем collections-поток для снижения нагрузки и задержек.
-    collection_items: list[dict] = []
-    collection_debug: dict[str, object] = {
-        'urls_processed': 0,
-        'pages_loaded': 0,
-        'errors': [],
-    }
+    direct_results = await asyncio.gather(
+        *[
+            _fetch_negotiations_pages(
+                client,
+                access_token=access_token,
+                vacancy_id=vacancy_id,
+                state=state,
+                expected_count_hint=hh_total_from_vacancy if hh_total_from_vacancy > 0 else None,
+            )
+            for state in fetch_states
+        ],
+        return_exceptions=True,
+    )
+    direct_items: list[dict] = []
+    direct_pages_loaded = 0
+    direct_raw_total = 0
+    direct_page_counts: list[dict[str, int]] = []
+    state_fetch_errors: list[str] = []
+    for state, result in zip(fetch_states, direct_results, strict=False):
+        if isinstance(result, Exception):
+            state_fetch_errors.append(f'{state}: {result}')
+            continue
+        state_items, pages_loaded, raw_total, page_counts, _ = result
+        direct_items.extend(state_items)
+        direct_pages_loaded += pages_loaded
+        if isinstance(raw_total, int):
+            direct_raw_total += raw_total
+        direct_page_counts.extend(page_counts)
+
+    collection_items, collection_debug = await _fetch_followup_negotiations_from_collections(
+        client,
+        access_token=access_token,
+        vacancy_id=vacancy_id,
+        payload=seed_payload,
+    )
 
     merged_raw_items: list[dict] = []
     seen_raw_keys: set[str] = set()
@@ -378,9 +408,6 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
                 continue
             seen_raw_keys.add(raw_key)
             merged_raw_items.append(item)
-
-    if len(merged_raw_items) > 50:
-        merged_raw_items = merged_raw_items[:50]
 
     unique_items: list[dict[str, object | None]] = []
     seen_response_ids: set[str] = set()
@@ -454,6 +481,8 @@ async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, 
             'collection_errors': collection_errors,
             'collection_errors_count': collection_errors_count,
             'collection_has_candidates': collection_has_candidates,
+            'state_fetch_errors': state_fetch_errors,
+            'states_processed': fetch_states,
             'duplicates_skipped': duplicates_skipped + duplicate_items,
             'missing_items': max(hh_total - loaded_count, 0),
             'summary_total': summary_total,
@@ -787,13 +816,12 @@ async def _fetch_negotiations_by_params(
     params: dict[str, str],
     expected_count_hint: int | None = None,
 ) -> tuple[list[dict], int, int | None, list[dict[str, int]], list[str]]:
-    per_page = 200
+    per_page = 50
     items: list[dict] = []
     raw_total: int | None = None
     page_counts: list[dict[str, int]] = []
     raw_ids: list[str] = []
     normalized_params = dict(params)
-    normalized_params['status'] = 'any'
 
     first_payload = await _hh_get(
         client,
@@ -825,7 +853,6 @@ async def _fetch_negotiations_by_params(
     max_pages_hint = max(
         value for value in (pages_hint, pages_by_total, pages_by_expected) if isinstance(value, int) and value > 0
     ) if any(isinstance(value, int) and value > 0 for value in (pages_hint, pages_by_total, pages_by_expected)) else 1
-    max_pages_hint = min(max_pages_hint, 5)
 
     if max_pages_hint > 1:
         page_tasks = [
@@ -972,7 +999,7 @@ async def _fetch_single_collection_path(
     collection_name_raw = indexed_state.get('state_name') or _extract_collection_name_by_state(payload, collection_state)
     collection_name = collection_name_raw if isinstance(collection_name_raw, str) and collection_name_raw else collection_state
 
-    per_page = 200
+    per_page = 50
     base_path = path.split('?', 1)[0]
     base_params = {
         **({'vacancy_id': vacancy_id} if 'vacancy_id=' not in path else {}),
