@@ -128,4 +128,40 @@ def _track_hh_user_login(payload: dict[str, object]) -> None:
     email_raw = payload.get('email')
     email = email_raw if isinstance(email_raw, str) and email_raw else None
 
-    upsert_hh_user(hh_id=hh_id, name=name, email=email)
+    employer_payload = payload.get('employer')
+    company_name = None
+    if isinstance(employer_payload, dict):
+        employer_name = employer_payload.get('name')
+        company_name = employer_name if isinstance(employer_name, str) else None
+
+    manager_payload = payload.get('manager')
+    vacancies_count = 0
+    if isinstance(manager_payload, dict):
+        vacancies_url = manager_payload.get('vacancies_url')
+        if isinstance(vacancies_url, str):
+            vacancies_count = _extract_count_from_url(vacancies_url)
+
+    responses_count = 0
+    if isinstance(manager_payload, dict):
+        negotiations_url = manager_payload.get('negotiations_url')
+        if isinstance(negotiations_url, str):
+            responses_count = _extract_count_from_url(negotiations_url)
+
+    upsert_hh_user(
+        hh_id=hh_id,
+        name=name,
+        email=email,
+        company_name=company_name,
+        vacancies_count=vacancies_count,
+        responses_count=responses_count,
+    )
+
+
+def _extract_count_from_url(url: str) -> int:
+    if 'found=' not in url:
+        return 0
+    try:
+        value = url.split('found=', maxsplit=1)[1].split('&', maxsplit=1)[0]
+        return int(value)
+    except (TypeError, ValueError):
+        return 0

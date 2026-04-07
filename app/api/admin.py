@@ -44,6 +44,6 @@ async def admin_login(payload: AdminLoginRequest) -> dict[str, str | bool]:
 
 
 @router.get('/users')
-async def admin_users(authorization: str | None = Header(default=None)) -> list[dict[str, str | None]]:
+async def admin_users(authorization: str | None = Header(default=None)) -> list[dict[str, str | int | None]]:
     _require_admin_token(authorization)
     return get_all_users()
