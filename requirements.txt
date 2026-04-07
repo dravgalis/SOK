@@ -12,6 +12,7 @@ httpx==0.28.1
 idna==3.11
 pydantic==2.12.5
 pydantic_core==2.41.5
+psycopg[binary]==3.2.10
 python-dotenv==1.2.2
 SQLAlchemy==2.0.48
 starlette==1.0.0

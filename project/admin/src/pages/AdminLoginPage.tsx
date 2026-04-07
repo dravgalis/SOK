@@ -34,13 +34,13 @@ export function AdminLoginPage() {
         throw new Error('Invalid login or password.');
       }
 
-      const payload = (await response.json()) as { success?: boolean };
+      const payload = (await response.json()) as { success?: boolean; token?: string };
 
-      if (!payload.success) {
+      if (!payload.success || !payload.token) {
         throw new Error('Authentication failed.');
       }
 
-      window.localStorage.setItem(ADMIN_STORAGE_KEY, 'true');
+      window.localStorage.setItem(ADMIN_STORAGE_KEY, payload.token);
       navigate(ADMIN_ROUTES.dashboard, { replace: true });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Authentication failed.';
