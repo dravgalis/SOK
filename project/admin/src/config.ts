@@ -1,7 +1,8 @@
 export const ADMIN_API = {
   login: 'https://sok-i9cq.onrender.com/admin/login',
   users: 'https://sok-i9cq.onrender.com/admin/users',
-  userVacancies: (hhId: string) => `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies`,
+  userVacancies: (hhId: string, force = false) =>
+    `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies${force ? '?force=true' : ''}`,
 } as const;
 
 export const ADMIN_ROUTES = {

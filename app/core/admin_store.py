@@ -50,6 +50,21 @@ def init_users_table() -> None:
                 '''
             )
         )
+        connection.execute(
+            text(
+                '''
+                CREATE TABLE IF NOT EXISTS user_vacancies (
+                    hh_id TEXT NOT NULL,
+                    vacancy_id TEXT NOT NULL,
+                    vacancy_name TEXT NOT NULL,
+                    vacancy_status TEXT NOT NULL,
+                    responses_count INTEGER NOT NULL DEFAULT 0,
+                    cached_at TEXT NOT NULL,
+                    PRIMARY KEY (hh_id, vacancy_id)
+                )
+                '''
+            )
+        )
         _ensure_column(connection, 'users', 'company_name', 'TEXT')
         _ensure_column(connection, 'users', 'vacancies_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
@@ -184,3 +199,63 @@ def get_user_access_token(hh_id: str) -> str | None:
         return None
     token = row[0]
     return token if isinstance(token, str) and token else None
+
+
+def get_cached_user_vacancies(hh_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
+    with ENGINE.connect() as connection:
+        cached_at_row = connection.execute(
+            text(
+                '''
+                SELECT MAX(cached_at) AS cached_at
+                FROM user_vacancies
+                WHERE hh_id = :hh_id
+                '''
+            ),
+            {'hh_id': hh_id},
+        ).first()
+        cached_at = cached_at_row[0] if cached_at_row and isinstance(cached_at_row[0], str) else None
+
+        rows = connection.execute(
+            text(
+                '''
+                SELECT vacancy_id, vacancy_name, vacancy_status, responses_count
+                FROM user_vacancies
+                WHERE hh_id = :hh_id
+                ORDER BY vacancy_status DESC, vacancy_name ASC
+                '''
+            ),
+            {'hh_id': hh_id},
+        ).mappings()
+
+        items = [
+            {
+                'id': row['vacancy_id'],
+                'name': row['vacancy_name'],
+                'status': row['vacancy_status'],
+                'responses_count': row['responses_count'],
+            }
+            for row in rows
+        ]
+        return cached_at, items
+
+
+def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], cached_at: str) -> None:
+    with ENGINE.begin() as connection:
+        connection.execute(text('DELETE FROM user_vacancies WHERE hh_id = :hh_id'), {'hh_id': hh_id})
+        for vacancy in vacancies:
+            connection.execute(
+                text(
+                    '''
+                    INSERT INTO user_vacancies (hh_id, vacancy_id, vacancy_name, vacancy_status, responses_count, cached_at)
+                    VALUES (:hh_id, :vacancy_id, :vacancy_name, :vacancy_status, :responses_count, :cached_at)
+                    '''
+                ),
+                {
+                    'hh_id': hh_id,
+                    'vacancy_id': str(vacancy.get('id', '')),
+                    'vacancy_name': str(vacancy.get('name', 'Без названия')),
+                    'vacancy_status': str(vacancy.get('status', 'active')),
+                    'responses_count': int(vacancy.get('responses_count', 0)),
+                    'cached_at': cached_at,
+                },
+            )

@@ -2,11 +2,18 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
-from ..core.admin_store import get_all_users, get_user_access_token, get_users_with_tokens, update_user_metrics
+from ..core.admin_store import (
+    get_all_users,
+    get_cached_user_vacancies,
+    get_user_access_token,
+    get_users_with_tokens,
+    replace_user_vacancies,
+    update_user_metrics,
+)
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 
@@ -54,8 +61,17 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
 
 
 @router.get('/users/{hh_id}/vacancies')
-async def admin_user_vacancies(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+async def admin_user_vacancies(
+    hh_id: str,
+    authorization: str | None = Header(default=None),
+    force: bool = Query(default=False),
+) -> dict[str, object]:
     _require_admin_token(authorization)
+
+    cached_at, cached_vacancies = get_cached_user_vacancies(hh_id)
+    if not force and cached_at and not _is_cache_expired(cached_at, minutes=30):
+        return {'hh_id': hh_id, 'vacancies': cached_vacancies, 'cached_at': cached_at, 'source': 'cache'}
+
     access_token = get_user_access_token(hh_id)
     if not access_token:
         raise HTTPException(status_code=404, detail='User token not found.')
@@ -66,7 +82,9 @@ async def admin_user_vacancies(hh_id: str, authorization: str | None = Header(de
         me_payload = me_response.json()
         vacancies = await _load_user_vacancies(client, access_token, me_payload)
 
-    return {'hh_id': hh_id, 'vacancies': vacancies}
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    replace_user_vacancies(hh_id, vacancies, refreshed_at)
+    return {'hh_id': hh_id, 'vacancies': vacancies, 'cached_at': refreshed_at, 'source': 'hh'}
 
 
 async def _refresh_metrics_for_stale_users() -> None:
@@ -105,6 +123,16 @@ def _needs_refresh(metrics_updated_at: str | int | None) -> bool:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
 
     return datetime.now(timezone.utc) - updated_at >= timedelta(seconds=10)
+
+
+def _is_cache_expired(cached_at: str, *, minutes: int) -> bool:
+    try:
+        parsed = datetime.fromisoformat(cached_at)
+    except ValueError:
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - parsed >= timedelta(minutes=minutes)
 
 
 async def _load_hh_metrics(client: httpx.AsyncClient, access_token: str) -> tuple[str | None, int, int]:
