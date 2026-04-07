@@ -24,6 +24,8 @@ def init_users_table() -> None:
                 company_name TEXT,
                 vacancies_count INTEGER NOT NULL DEFAULT 0,
                 responses_count INTEGER NOT NULL DEFAULT 0,
+                access_token TEXT,
+                metrics_updated_at TEXT,
                 created_at TEXT NOT NULL,
                 last_login TEXT NOT NULL
             )
@@ -32,6 +34,8 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'company_name', 'TEXT')
         _ensure_column(connection, 'users', 'vacancies_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
+        _ensure_column(connection, 'users', 'access_token', 'TEXT')
+        _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
         connection.commit()
 
 
@@ -50,6 +54,8 @@ def upsert_hh_user(
     company_name: str | None,
     vacancies_count: int,
     responses_count: int,
+    access_token: str | None,
+    metrics_updated_at: str | None,
 ) -> None:
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -59,19 +65,32 @@ def upsert_hh_user(
         if existing is None:
             connection.execute(
                 '''
-                INSERT INTO users (hh_id, name, email, company_name, vacancies_count, responses_count, created_at, last_login)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO users (
+                    hh_id, name, email, company_name, vacancies_count, responses_count, access_token, metrics_updated_at, created_at, last_login
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (hh_id, name, email, company_name, vacancies_count, responses_count, timestamp, timestamp),
+                (
+                    hh_id,
+                    name,
+                    email,
+                    company_name,
+                    vacancies_count,
+                    responses_count,
+                    access_token,
+                    metrics_updated_at,
+                    timestamp,
+                    timestamp,
+                ),
             )
         else:
             connection.execute(
                 '''
                 UPDATE users
-                SET name = ?, email = ?, company_name = ?, vacancies_count = ?, responses_count = ?, last_login = ?
+                SET name = ?, email = ?, company_name = ?, vacancies_count = ?, responses_count = ?, access_token = ?, metrics_updated_at = ?, last_login = ?
                 WHERE hh_id = ?
                 ''',
-                (name, email, company_name, vacancies_count, responses_count, timestamp, hh_id),
+                (name, email, company_name, vacancies_count, responses_count, access_token, metrics_updated_at, timestamp, hh_id),
             )
 
         connection.commit()
@@ -100,3 +119,36 @@ def get_all_users() -> list[dict[str, str | int | None]]:
         }
         for row in rows
     ]
+
+
+def get_users_with_tokens() -> list[dict[str, str | int | None]]:
+    with _connect() as connection:
+        rows = connection.execute(
+            '''
+            SELECT hh_id, access_token, metrics_updated_at
+            FROM users
+            '''
+        ).fetchall()
+
+    return [
+        {
+            'hh_id': row['hh_id'],
+            'access_token': row['access_token'],
+            'metrics_updated_at': row['metrics_updated_at'],
+        }
+        for row in rows
+    ]
+
+
+def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count: int, responses_count: int) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with _connect() as connection:
+        connection.execute(
+            '''
+            UPDATE users
+            SET company_name = ?, vacancies_count = ?, responses_count = ?, metrics_updated_at = ?
+            WHERE hh_id = ?
+            ''',
+            (company_name, vacancies_count, responses_count, timestamp, hh_id),
+        )
+        connection.commit()

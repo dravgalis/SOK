@@ -56,6 +56,13 @@ export function AdminDashboardPage() {
     };
 
     void loadUsers();
+    const intervalId = window.setInterval(() => {
+      void loadUsers();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [navigate]);
 
   return (
