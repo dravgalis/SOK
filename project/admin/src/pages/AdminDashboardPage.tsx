@@ -2,30 +2,38 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ADMIN_API, ADMIN_ROUTES, ADMIN_STORAGE_KEY } from '../config';
 
-type UsersCountResponse = {
-  count: number;
+type AdminUser = {
+  hh_id: string;
+  name: string;
+  email: string | null;
+  company_name: string | null;
+  vacancies_count: number;
+  responses_count: number;
+  created_at: string;
+  last_login: string;
 };
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
-  const [count, setCount] = useState<number | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const isAuthenticated = window.localStorage.getItem(ADMIN_STORAGE_KEY) === 'true';
+    const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
 
-    if (!isAuthenticated) {
+    if (!token) {
       navigate(ADMIN_ROUTES.login, { replace: true });
       return;
     }
 
-    const loadUsersCount = async () => {
+    const loadUsers = async () => {
       try {
         setError('');
-        const response = await fetch(ADMIN_API.usersCount, {
+        const response = await fetch(ADMIN_API.users, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
           },
           credentials: 'include',
         });
@@ -37,17 +45,24 @@ export function AdminDashboardPage() {
         }
 
         if (!response.ok) {
-          throw new Error('Failed to load authorized users count.');
+          throw new Error('Failed to load HH users data.');
         }
 
-        const payload = (await response.json()) as UsersCountResponse;
-        setCount(payload.count);
+        const payload = (await response.json()) as AdminUser[];
+        setUsers(payload);
       } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load authorized users count.');
+        setError(loadError instanceof Error ? loadError.message : 'Failed to load HH users data.');
       }
     };
 
-    void loadUsersCount();
+    void loadUsers();
+    const intervalId = window.setInterval(() => {
+      void loadUsers();
+    }, 10000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [navigate]);
 
   return (
@@ -57,7 +72,31 @@ export function AdminDashboardPage() {
 
         {error ? <p className="error">{error}</p> : null}
 
-        <p>Authorized users count: {count ?? '...'}</p>
+        <p>Users who logged in via HH: {users.length}</p>
+        <div className="tableWrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Vacancies</th>
+                <th>Responses</th>
+                <th>User</th>
+                <th>Last login</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.hh_id}>
+                  <td>{user.company_name ?? '—'}</td>
+                  <td>{user.vacancies_count}</td>
+                  <td>{user.responses_count}</td>
+                  <td>{user.name}</td>
+                  <td>{new Date(user.last_login).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );

@@ -1,5 +1,6 @@
 import os
 import secrets
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
@@ -86,9 +87,16 @@ async def hh_callback(
                 'https://api.hh.ru/me',
                 headers={'Authorization': f'Bearer {access_token}'},
             )
-        me_response.raise_for_status()
-        me_payload = me_response.json()
-        _track_hh_user_login(me_payload)
+            me_response.raise_for_status()
+            me_payload = me_response.json()
+            company_name, vacancies_count, responses_count = await _load_hh_metrics(client, access_token, me_payload)
+        _track_hh_user_login(
+            me_payload,
+            access_token=access_token,
+            company_name=company_name,
+            vacancies_count=vacancies_count,
+            responses_count=responses_count,
+        )
     except (httpx.HTTPError, ValueError):
         return _frontend_error_redirect(frontend_url, 'failed_to_track_user')
 
@@ -113,7 +121,14 @@ def _frontend_error_redirect(base_url: str, message: str) -> RedirectResponse:
     return RedirectResponse(url=redirect_url, status_code=307)
 
 
-def _track_hh_user_login(payload: dict[str, object]) -> None:
+def _track_hh_user_login(
+    payload: dict[str, object],
+    *,
+    access_token: str,
+    company_name: str | None,
+    vacancies_count: int,
+    responses_count: int,
+) -> None:
     hh_id_raw = payload.get('id')
     hh_id = str(hh_id_raw).strip() if hh_id_raw is not None else ''
     if not hh_id:
@@ -128,4 +143,80 @@ def _track_hh_user_login(payload: dict[str, object]) -> None:
     email_raw = payload.get('email')
     email = email_raw if isinstance(email_raw, str) and email_raw else None
 
-    upsert_hh_user(hh_id=hh_id, name=name, email=email)
+    upsert_hh_user(
+        hh_id=hh_id,
+        name=name,
+        email=email,
+        company_name=company_name,
+        vacancies_count=vacancies_count,
+        responses_count=responses_count,
+        access_token=access_token,
+        metrics_updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+async def _load_hh_metrics(
+    client: httpx.AsyncClient,
+    access_token: str,
+    me_payload: dict[str, object],
+) -> tuple[str | None, int, int]:
+    employer_payload = me_payload.get('employer')
+    company_name = None
+    employer_id = None
+    if isinstance(employer_payload, dict):
+        employer_name = employer_payload.get('name')
+        company_name = employer_name if isinstance(employer_name, str) else None
+        employer_id_raw = employer_payload.get('id')
+        employer_id = str(employer_id_raw).strip() if employer_id_raw is not None else None
+
+    manager_payload = me_payload.get('manager')
+    manager_id = None
+    if isinstance(manager_payload, dict):
+        manager_id_raw = manager_payload.get('id')
+        manager_id = str(manager_id_raw).strip() if manager_id_raw is not None else None
+
+    if not employer_id:
+        return company_name, 0, 0
+
+    vacancies_count = 0
+    responses_count = 0
+    for archived in (False, True):
+        page = 0
+        pages = 1
+        while page < pages:
+            params = {
+                'employer_id': employer_id,
+                'archived': 'true' if archived else 'false',
+                'per_page': '100',
+                'page': str(page),
+            }
+            if manager_id:
+                params['manager_id'] = manager_id
+
+            response = await client.get(
+                'https://api.hh.ru/vacancies',
+                headers={'Authorization': f'Bearer {access_token}'},
+                params=params,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            items = payload.get('items')
+            if not isinstance(items, list):
+                items = []
+
+            vacancies_count += len(items)
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                counters = item.get('counters')
+                if not isinstance(counters, dict):
+                    continue
+                responses_raw = counters.get('responses')
+                if isinstance(responses_raw, int):
+                    responses_count += responses_raw
+
+            page += 1
+            pages_raw = payload.get('pages')
+            pages = pages_raw if isinstance(pages_raw, int) and pages_raw > 0 else 1
+
+    return company_name, vacancies_count, responses_count

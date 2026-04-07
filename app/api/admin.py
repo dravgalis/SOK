@@ -1,9 +1,11 @@
 import os
+from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from ..core.admin_store import get_all_users
+from ..core.admin_store import get_all_users, get_users_with_tokens, update_user_metrics
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 
@@ -44,6 +46,112 @@ async def admin_login(payload: AdminLoginRequest) -> dict[str, str | bool]:
 
 
 @router.get('/users')
-async def admin_users(authorization: str | None = Header(default=None)) -> list[dict[str, str | None]]:
+async def admin_users(authorization: str | None = Header(default=None)) -> list[dict[str, str | int | None]]:
     _require_admin_token(authorization)
+    await _refresh_metrics_for_stale_users()
     return get_all_users()
+
+
+async def _refresh_metrics_for_stale_users() -> None:
+    users = get_users_with_tokens()
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for user in users:
+            hh_id_raw = user.get('hh_id')
+            token = user.get('access_token')
+            if not isinstance(hh_id_raw, str) or not isinstance(token, str) or not token:
+                continue
+
+            if not _needs_refresh(user.get('metrics_updated_at')):
+                continue
+
+            try:
+                company_name, vacancies_count, responses_count = await _load_hh_metrics(client, token)
+                update_user_metrics(
+                    hh_id=hh_id_raw,
+                    company_name=company_name,
+                    vacancies_count=vacancies_count,
+                    responses_count=responses_count,
+                )
+            except httpx.HTTPError:
+                continue
+
+
+def _needs_refresh(metrics_updated_at: str | int | None) -> bool:
+    if not isinstance(metrics_updated_at, str) or not metrics_updated_at:
+        return True
+    try:
+        updated_at = datetime.fromisoformat(metrics_updated_at)
+    except ValueError:
+        return True
+
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+
+    return datetime.now(timezone.utc) - updated_at >= timedelta(seconds=10)
+
+
+async def _load_hh_metrics(client: httpx.AsyncClient, access_token: str) -> tuple[str | None, int, int]:
+    me_response = await client.get('https://api.hh.ru/me', headers={'Authorization': f'Bearer {access_token}'})
+    me_response.raise_for_status()
+    me_payload = me_response.json()
+
+    employer_payload = me_payload.get('employer')
+    employer_id = None
+    company_name = None
+    if isinstance(employer_payload, dict):
+        employer_id_raw = employer_payload.get('id')
+        employer_id = str(employer_id_raw).strip() if employer_id_raw is not None else None
+        employer_name = employer_payload.get('name')
+        company_name = employer_name if isinstance(employer_name, str) else None
+
+    if not employer_id:
+        return company_name, 0, 0
+
+    manager_id = None
+    manager_payload = me_payload.get('manager')
+    if isinstance(manager_payload, dict):
+        manager_id_raw = manager_payload.get('id')
+        manager_id = str(manager_id_raw).strip() if manager_id_raw is not None else None
+
+    vacancies_count = 0
+    responses_count = 0
+    for archived in (False, True):
+        page = 0
+        pages = 1
+        while page < pages:
+            params = {
+                'employer_id': employer_id,
+                'archived': 'true' if archived else 'false',
+                'per_page': '100',
+                'page': str(page),
+            }
+            if manager_id:
+                params['manager_id'] = manager_id
+
+            vacancies_response = await client.get(
+                'https://api.hh.ru/vacancies',
+                headers={'Authorization': f'Bearer {access_token}'},
+                params=params,
+            )
+            vacancies_response.raise_for_status()
+            payload = vacancies_response.json()
+
+            items = payload.get('items')
+            if not isinstance(items, list):
+                items = []
+            vacancies_count += len(items)
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                counters = item.get('counters')
+                if not isinstance(counters, dict):
+                    continue
+                responses_raw = counters.get('responses')
+                if isinstance(responses_raw, int):
+                    responses_count += responses_raw
+
+            page += 1
+            pages_raw = payload.get('pages')
+            pages = pages_raw if isinstance(pages_raw, int) and pages_raw > 0 else 1
+
+    return company_name, vacancies_count, responses_count

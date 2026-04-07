@@ -1,6 +1,6 @@
 export const ADMIN_API = {
   login: 'https://sok-i9cq.onrender.com/admin/login',
-  usersCount: 'https://sok-i9cq.onrender.com/api/admin/users-count',
+  users: 'https://sok-i9cq.onrender.com/admin/users',
 } as const;
 
 export const ADMIN_ROUTES = {
@@ -8,4 +8,4 @@ export const ADMIN_ROUTES = {
   dashboard: '/admin/dashboard',
 } as const;
 
-export const ADMIN_STORAGE_KEY = 'admin_authenticated';
+export const ADMIN_STORAGE_KEY = 'admin_token';
