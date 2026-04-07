@@ -34,8 +34,7 @@ body {
   gap: 12px;
 }
 
-input,
-button {
+input {
   width: 100%;
   padding: 10px 12px;
   border: 1px solid #d0d5dd;
@@ -44,7 +43,16 @@ button {
 }
 
 button {
+  padding: 8px 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
   cursor: pointer;
+}
+
+.form button {
+  width: 100%;
 }
 
 .error {

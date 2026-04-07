@@ -150,6 +150,9 @@ def _track_hh_user_login(
         company_name=company_name,
         vacancies_count=vacancies_count,
         responses_count=responses_count,
+        subscription_status=None,
+        subscription_expires_at=None,
+        selected_interface='hh',
         access_token=access_token,
         metrics_updated_at=datetime.now(timezone.utc).isoformat(),
     )

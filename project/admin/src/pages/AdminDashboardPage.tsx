@@ -7,8 +7,9 @@ type AdminUser = {
   name: string;
   email: string | null;
   company_name: string | null;
-  vacancies_count: number;
-  responses_count: number;
+  subscription_status: string | null;
+  subscription_expires_at: string | null;
+  selected_interface: string | null;
   created_at: string;
   last_login: string;
 };
@@ -78,20 +79,30 @@ export function AdminDashboardPage() {
             <thead>
               <tr>
                 <th>Company</th>
-                <th>Vacancies</th>
-                <th>Responses</th>
                 <th>User</th>
                 <th>Last login</th>
+                <th>Subscription status</th>
+                <th>Subscription ends</th>
+                <th>Selected interface</th>
+                <th>Account</th>
               </tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <tr key={user.hh_id}>
                   <td>{user.company_name ?? '—'}</td>
-                  <td>{user.vacancies_count}</td>
-                  <td>{user.responses_count}</td>
                   <td>{user.name}</td>
                   <td>{new Date(user.last_login).toLocaleString()}</td>
+                  <td>{user.subscription_status ?? '—'}</td>
+                  <td>
+                    {user.subscription_expires_at ? new Date(user.subscription_expires_at).toLocaleDateString() : '—'}
+                  </td>
+                  <td>{user.selected_interface ?? '—'}</td>
+                  <td>
+                    <button type="button" onClick={() => navigate(ADMIN_ROUTES.userDetails(user.hh_id))}>
+                      Open
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

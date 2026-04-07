@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from ..core.admin_store import get_all_users, get_users_with_tokens, update_user_metrics
+from ..core.admin_store import get_all_users, get_user_access_token, get_users_with_tokens, update_user_metrics
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 
@@ -50,6 +50,22 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
     _require_admin_token(authorization)
     await _refresh_metrics_for_stale_users()
     return get_all_users()
+
+
+@router.get('/users/{hh_id}/vacancies')
+async def admin_user_vacancies(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    access_token = get_user_access_token(hh_id)
+    if not access_token:
+        raise HTTPException(status_code=404, detail='User token not found.')
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        me_response = await client.get('https://api.hh.ru/me', headers={'Authorization': f'Bearer {access_token}'})
+        me_response.raise_for_status()
+        me_payload = me_response.json()
+        vacancies = await _load_user_vacancies(client, access_token, me_payload)
+
+    return {'hh_id': hh_id, 'vacancies': vacancies}
 
 
 async def _refresh_metrics_for_stale_users() -> None:
@@ -155,3 +171,70 @@ async def _load_hh_metrics(client: httpx.AsyncClient, access_token: str) -> tupl
             pages = pages_raw if isinstance(pages_raw, int) and pages_raw > 0 else 1
 
     return company_name, vacancies_count, responses_count
+
+
+async def _load_user_vacancies(
+    client: httpx.AsyncClient, access_token: str, me_payload: dict[str, object]
+) -> list[dict[str, str | int]]:
+    employer_payload = me_payload.get('employer')
+    employer_id = None
+    if isinstance(employer_payload, dict):
+        employer_id_raw = employer_payload.get('id')
+        employer_id = str(employer_id_raw).strip() if employer_id_raw is not None else None
+    if not employer_id:
+        return []
+
+    manager_id = None
+    manager_payload = me_payload.get('manager')
+    if isinstance(manager_payload, dict):
+        manager_id_raw = manager_payload.get('id')
+        manager_id = str(manager_id_raw).strip() if manager_id_raw is not None else None
+
+    rows: list[dict[str, str | int]] = []
+    for archived in (False, True):
+        page = 0
+        pages = 1
+        while page < pages:
+            params = {
+                'employer_id': employer_id,
+                'archived': 'true' if archived else 'false',
+                'per_page': '100',
+                'page': str(page),
+            }
+            if manager_id:
+                params['manager_id'] = manager_id
+
+            vacancies_response = await client.get(
+                'https://api.hh.ru/vacancies',
+                headers={'Authorization': f'Bearer {access_token}'},
+                params=params,
+            )
+            vacancies_response.raise_for_status()
+            payload = vacancies_response.json()
+            items = payload.get('items')
+            if not isinstance(items, list):
+                items = []
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                vacancy_id_raw = item.get('id')
+                vacancy_name_raw = item.get('name')
+                counters = item.get('counters')
+                responses_count = 0
+                if isinstance(counters, dict) and isinstance(counters.get('responses'), int):
+                    responses_count = counters['responses']
+                rows.append(
+                    {
+                        'id': str(vacancy_id_raw) if vacancy_id_raw is not None else '',
+                        'name': vacancy_name_raw if isinstance(vacancy_name_raw, str) else 'Без названия',
+                        'status': 'archived' if archived else 'active',
+                        'responses_count': responses_count,
+                    }
+                )
+
+            page += 1
+            pages_raw = payload.get('pages')
+            pages = pages_raw if isinstance(pages_raw, int) and pages_raw > 0 else 1
+
+    return rows
