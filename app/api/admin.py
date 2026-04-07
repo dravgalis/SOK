@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
 from ..core.admin_store import get_all_users, get_user_access_token, get_users_with_tokens, update_user_metrics
 
 router = APIRouter(prefix='/admin', tags=['admin'])
@@ -176,65 +177,49 @@ async def _load_hh_metrics(client: httpx.AsyncClient, access_token: str) -> tupl
 async def _load_user_vacancies(
     client: httpx.AsyncClient, access_token: str, me_payload: dict[str, object]
 ) -> list[dict[str, str | int]]:
-    employer_payload = me_payload.get('employer')
-    employer_id = None
-    if isinstance(employer_payload, dict):
-        employer_id_raw = employer_payload.get('id')
-        employer_id = str(employer_id_raw).strip() if employer_id_raw is not None else None
+    employer_id = _extract_employer_id(me_payload)
     if not employer_id:
         return []
 
-    manager_id = None
-    manager_payload = me_payload.get('manager')
-    if isinstance(manager_payload, dict):
-        manager_id_raw = manager_payload.get('id')
-        manager_id = str(manager_id_raw).strip() if manager_id_raw is not None else None
+    manager_id = _extract_manager_id(me_payload)
 
     rows: list[dict[str, str | int]] = []
-    for archived in (False, True):
-        page = 0
-        pages = 1
-        while page < pages:
-            params = {
-                'employer_id': employer_id,
-                'archived': 'true' if archived else 'false',
-                'per_page': '100',
-                'page': str(page),
-            }
-            if manager_id:
-                params['manager_id'] = manager_id
+    active_vacancies = await _fetch_all_vacancies(
+        client,
+        access_token=access_token,
+        employer_id=employer_id,
+        manager_id=manager_id,
+        archived=False,
+    )
+    archived_vacancies = await _fetch_all_vacancies(
+        client,
+        access_token=access_token,
+        employer_id=employer_id,
+        manager_id=manager_id,
+        archived=True,
+    )
 
-            vacancies_response = await client.get(
-                'https://api.hh.ru/vacancies',
-                headers={'Authorization': f'Bearer {access_token}'},
-                params=params,
+    for archived, vacancies in ((False, active_vacancies), (True, archived_vacancies)):
+        for item in vacancies:
+            if not isinstance(item, dict):
+                continue
+            vacancy_id_raw = item.get('id')
+            vacancy_id = str(vacancy_id_raw) if vacancy_id_raw is not None else ''
+            if not vacancy_id:
+                continue
+
+            responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+            responses_count_raw = responses_payload.get('loaded_count')
+            responses_count = responses_count_raw if isinstance(responses_count_raw, int) else 0
+
+            vacancy_name_raw = item.get('name')
+            rows.append(
+                {
+                    'id': vacancy_id,
+                    'name': vacancy_name_raw if isinstance(vacancy_name_raw, str) else 'Без названия',
+                    'status': 'archived' if archived else 'active',
+                    'responses_count': responses_count,
+                }
             )
-            vacancies_response.raise_for_status()
-            payload = vacancies_response.json()
-            items = payload.get('items')
-            if not isinstance(items, list):
-                items = []
-
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                vacancy_id_raw = item.get('id')
-                vacancy_name_raw = item.get('name')
-                counters = item.get('counters')
-                responses_count = 0
-                if isinstance(counters, dict) and isinstance(counters.get('responses'), int):
-                    responses_count = counters['responses']
-                rows.append(
-                    {
-                        'id': str(vacancy_id_raw) if vacancy_id_raw is not None else '',
-                        'name': vacancy_name_raw if isinstance(vacancy_name_raw, str) else 'Без названия',
-                        'status': 'archived' if archived else 'active',
-                        'responses_count': responses_count,
-                    }
-                )
-
-            page += 1
-            pages_raw = payload.get('pages')
-            pages = pages_raw if isinstance(pages_raw, int) and pages_raw > 0 else 1
 
     return rows
