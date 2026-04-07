@@ -12,6 +12,8 @@ type VacancyRow = {
 type VacanciesResponse = {
   hh_id: string;
   vacancies: VacancyRow[];
+  source?: 'cache' | 'hh';
+  cached_at?: string;
 };
 
 export function AdminUserDetailsPage() {
@@ -19,6 +21,8 @@ export function AdminUserDetailsPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<VacancyRow[]>([]);
   const [error, setError] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading'>('idle');
+  const [source, setSource] = useState<'cache' | 'hh' | null>(null);
 
   useEffect(() => {
     const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
@@ -31,10 +35,11 @@ export function AdminUserDetailsPage() {
       return;
     }
 
-    const loadRows = async () => {
+    const loadRows = async (force = false) => {
       try {
+        setStatus('loading');
         setError('');
-        const response = await fetch(ADMIN_API.userVacancies(hhId), {
+        const response = await fetch(ADMIN_API.userVacancies(hhId, force), {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -55,20 +60,49 @@ export function AdminUserDetailsPage() {
 
         const payload = (await response.json()) as VacanciesResponse;
         setRows(payload.vacancies);
+        setSource(payload.source ?? null);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Failed to load vacancies.');
+      } finally {
+        setStatus('idle');
       }
     };
 
     void loadRows();
-    const intervalId = window.setInterval(() => {
-      void loadRows();
-    }, 30 * 60 * 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
+    return undefined;
   }, [hhId, navigate]);
+
+  const handleRefresh = async () => {
+    const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
+    if (!token || !hhId) {
+      return;
+    }
+
+    try {
+      setStatus('loading');
+      setError('');
+      const response = await fetch(ADMIN_API.userVacancies(hhId, true), {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to refresh vacancies.');
+      }
+
+      const payload = (await response.json()) as VacanciesResponse;
+      setRows(payload.vacancies);
+      setSource(payload.source ?? null);
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : 'Failed to refresh vacancies.');
+    } finally {
+      setStatus('idle');
+    }
+  };
 
   return (
     <main className="page">
@@ -77,6 +111,10 @@ export function AdminUserDetailsPage() {
         <button type="button" onClick={() => navigate(ADMIN_ROUTES.dashboard)}>
           ← Back to dashboard
         </button>
+        <button type="button" onClick={handleRefresh} disabled={status === 'loading'}>
+          {status === 'loading' ? 'Обновляю...' : 'Актуализировать'}
+        </button>
+        {source ? <p>Источник данных: {source === 'cache' ? 'кэш' : 'HH API'}</p> : null}
 
         {error ? <p className="error">{error}</p> : null}
 

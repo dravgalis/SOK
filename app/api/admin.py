@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
@@ -61,11 +61,15 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
 
 
 @router.get('/users/{hh_id}/vacancies')
-async def admin_user_vacancies(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+async def admin_user_vacancies(
+    hh_id: str,
+    authorization: str | None = Header(default=None),
+    force: bool = Query(default=False),
+) -> dict[str, object]:
     _require_admin_token(authorization)
 
     cached_at, cached_vacancies = get_cached_user_vacancies(hh_id)
-    if cached_at and not _is_cache_expired(cached_at, minutes=30):
+    if not force and cached_at and not _is_cache_expired(cached_at, minutes=30):
         return {'hh_id': hh_id, 'vacancies': cached_vacancies, 'cached_at': cached_at, 'source': 'cache'}
 
     access_token = get_user_access_token(hh_id)
