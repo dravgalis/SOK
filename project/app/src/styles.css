@@ -492,20 +492,32 @@ p {
 
 .score-info-icon {
   appearance: none;
-  width: 18px;
-  height: 18px;
+  min-width: 24px;
+  height: 24px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface-subtle);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   cursor: help;
-  padding: 0;
+  padding: 0 4px 0 3px;
   line-height: 1;
+}
+
+.score-info-main {
+  line-height: 1;
+}
+
+.score-info-hover-hint {
+  color: var(--primary);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.9;
 }
 
 .score-tooltip {
