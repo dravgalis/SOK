@@ -224,9 +224,9 @@ p {
 }
 
 .scoring-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
   align-items: center;
 }
 
@@ -260,6 +260,7 @@ p {
 
 .scoring-copy {
   text-align: center;
+  max-width: 760px;
 }
 
 .image-mock {
@@ -278,7 +279,7 @@ p {
 }
 
 .app-preview {
-  width: 100%;
+  width: min(900px, 100%);
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 14px;
   padding: 14px;
@@ -323,6 +324,75 @@ p {
 .candidate-main p {
   margin: 0 0 4px;
   font-size: 0.92rem;
+}
+
+.score-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-hint {
+  position: relative;
+}
+
+.hint-trigger {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.45);
+  color: #cbd5e1;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hint-popover {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  width: 320px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(2, 6, 23, 0.95);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 4;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: 0.2s ease;
+}
+
+.match-hint:hover .hint-popover,
+.hint-trigger:focus + .hint-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.hint-title {
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 8px;
+}
+
+.hint-popover ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.hint-popover li {
+  margin-bottom: 4px;
+  font-size: 0.86rem;
+}
+
+.hint-popover li.ok {
+  color: #22c55e;
+}
+
+.hint-popover li.bad {
+  color: #ef4444;
 }
 
 .score-badge {
@@ -412,7 +482,6 @@ p {
 @media (max-width: 900px) {
   .hero-grid,
   .feature-row,
-  .scoring-grid,
   .pricing-grid {
     grid-template-columns: 1fr;
   }
@@ -424,5 +493,10 @@ p {
   .feature-row-reverse .feature-copy,
   .feature-row-reverse .image-mock {
     order: initial;
+  }
+
+  .hint-popover {
+    right: -30px;
+    width: 280px;
   }
 }
