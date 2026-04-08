@@ -7,16 +7,138 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="hero">
-      <section class="hero-card">
-        <h1>Сервис подбора с интеграцией HeadHunter</h1>
-        <p>
-          Анализируйте отклики, управляйте воронкой найма и работайте с кандидатами в
-          одном месте.
-        </p>
-        <div class="actions">
-          <a class="button" href="http://localhost:5173">Попробовать</a>
-          <a class="link" href="http://localhost:5173">Перейти в приложение</a>
+    <main class="landing">
+      <div class="bg-orb bg-orb-1"></div>
+      <div class="bg-orb bg-orb-2"></div>
+
+      <header class="topbar container">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <span>HH Hiring Score</span>
+        </div>
+      </header>
+
+      <section class="section hero">
+        <div class="container hero-grid">
+          <div class="hero-content">
+            <p class="badge">Интеграция с HeadHunter</p>
+            <h1>Не тратьте время на разбор 1000 откликов на одну вакансию</h1>
+            <p class="lead">
+              Я сам работал HR и каждый раз, когда открывал новую вакансию, получал от 200 до 1000 откликов — и до 97%
+              из них оказывались нерелевантными. Я устал терять на это время, поэтому разработал собственный инструмент
+              и решил поделиться им с коллегами. <br /><br />
+              Смотрите самых сильных кандидатов первыми. Все данные загружаются прямо из аккаунта HH, приложение
+              зарегистрировано в HH и работает в рамках официальной интеграции.
+            </p>
+            <div class="actions">
+              <a class="button button-primary" href="https://sok-app.onrender.com">Попробовать 3 дня бесплатно</a>
+              <a class="button button-secondary" href="https://sok-app.onrender.com">Перейти в приложение</a>
+            </div>
+            <div class="hero-tags">
+              <span>Оценка кандидатов</span>
+              <span>Без ручной рутины</span>
+              <span>Прозрачный скоринг</span>
+            </div>
+          </div>
+          <div class="hero-panel">
+            <h2>Быстрый старт за 3 шага</h2>
+            <ol>
+              <li>Подключите аккаунт HH.</li>
+              <li>Откройте нужную вакансию.</li>
+              <li>Получите ранжированный список кандидатов за минуты.</li>
+            </ol>
+            <div class="panel-stat">
+              <strong>до 70%</strong>
+              <span>меньше времени на первичный разбор откликов</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-plain">
+        <div class="container feature-row">
+          <div class="feature-copy">
+            <h2>Никакого ИИ — решение всегда за HR</h2>
+            <p>
+              Мы не используем генеративные рекомендации, которые могут приводить к ошибочным автоматическим отказам.
+              Сервис помогает структурировать данные, а последнее решение всегда принимает HR-специалист.
+            </p>
+          </div>
+          <div class="image-mock">Иллюстрация: контроль решения у HR</div>
+        </div>
+      </section>
+
+      <section class="section section-plain">
+        <div class="container feature-row feature-row-reverse">
+          <div class="feature-copy">
+            <h2>Все по закону: соблюдение 152-ФЗ</h2>
+            <p>
+              Данные кандидатов не распространяются и обрабатываются с соблюдением требований 152-ФЗ о хранении
+              персональных данных.
+            </p>
+          </div>
+          <div class="image-mock">Иллюстрация: безопасность данных</div>
+        </div>
+      </section>
+
+      <section class="section section-plain">
+        <div class="container scoring-grid">
+          <div>
+            <h2>Принимайте решение на основе алгоритма баллов</h2>
+            <ul class="score-list">
+              <li>Совпадение по навыкам</li>
+              <li>Совпадение по опыту</li>
+              <li>Совпадение по специализации</li>
+              <li>Совпадение по локации</li>
+              <li>Совпадение по формату работы</li>
+              <li>Совпадение по вилке зарплаты</li>
+            </ul>
+          </div>
+          <div class="screenshot-placeholder">
+            <div>
+              <p class="placeholder-title">Здесь будет скрин из приложения</p>
+              <p>Сюда можно поставить реальный экран с таблицей кандидатов и скорингом.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-plain">
+        <div class="container feature-row">
+          <div class="feature-copy">
+            <h2>Все автоматизировано</h2>
+            <p>Остается только зайти в систему и наслаждаться прозрачной оценкой кандидатов.</p>
+          </div>
+          <div class="image-mock">Иллюстрация: автоматизация процессов</div>
+        </div>
+      </section>
+
+      <section class="section section-plain pricing">
+        <div class="container">
+          <h2>Тарифы</h2>
+          <div class="pricing-grid">
+            <article class="price-card">
+              <h3>1 месяц</h3>
+              <p class="price">399 ₽ / мес</p>
+              <p class="muted">Для быстрого старта и теста процесса</p>
+            </article>
+            <article class="price-card price-card-featured">
+              <p class="popular">Самый популярный</p>
+              <h3>6 месяцев</h3>
+              <p class="price">2 150 ₽ / 6 месяцев</p>
+              <p class="discount">Скидка 10%</p>
+              <p class="muted">Оптимально для системного найма</p>
+            </article>
+            <article class="price-card">
+              <h3>1 год</h3>
+              <p class="price">3 799 ₽ / год</p>
+              <p class="discount">Скидка 20%</p>
+              <p class="muted">Максимальная выгода для активной команды</p>
+            </article>
+          </div>
+          <div class="pricing-action">
+            <a class="button button-primary" href="https://sok-app.onrender.com">Попробовать 3 дня бесплатно</a>
+          </div>
         </div>
       </section>
     </main>
