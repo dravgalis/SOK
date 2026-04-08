@@ -44,16 +44,6 @@ body {
   top: 120px;
 }
 
-.bg-grid {
-  position: absolute;
-  inset: 0;
-  background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-  background-size: 36px 36px;
-  z-index: 0;
-  pointer-events: none;
-}
-
 .container {
   width: min(1080px, calc(100% - 32px));
   margin: 0 auto;
