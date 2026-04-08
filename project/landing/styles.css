@@ -335,6 +335,9 @@ p {
 
 .match-hint {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .hint-trigger {
@@ -350,12 +353,12 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 1px;
 }
 
-.hint-trigger span:last-child {
-  font-size: 0.62rem;
-  color: #60a5fa;
+.hint-side-arrow {
+  color: #c2cadb;
+  font-size: 0.78rem;
+  line-height: 1;
 }
 
 .hint-popover {
@@ -375,7 +378,7 @@ p {
 }
 
 .match-hint:hover .hint-popover,
-.hint-trigger:focus + .hint-popover {
+.hint-trigger:focus ~ .hint-popover {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
@@ -445,6 +448,12 @@ p {
   border-radius: 14px;
   padding: 18px;
   background: rgba(15, 23, 42, 0.45);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.price-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.32);
 }
 
 .price-card-featured {

@@ -520,6 +520,17 @@ p {
   opacity: 0.9;
 }
 
+.score-info-main {
+  line-height: 1;
+}
+
+.score-info-hover-hint {
+  color: #c2cadb;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 1;
+}
+
 .score-tooltip {
   position: absolute;
   top: calc(100% + 8px);

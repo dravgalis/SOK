@@ -471,10 +471,10 @@ export function VacancyDetailsPage() {
                           }
                         >
                           <span className="score-info-main">!</span>
-                          <span className="score-info-hover-hint" aria-hidden="true">
-                            ↺
-                          </span>
                         </button>
+                        <span className="score-info-hover-hint" aria-hidden="true">
+                          ↺
+                        </span>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
                         <div className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`} role="tooltip">
                           <h4>Разбор совпадения</h4>
