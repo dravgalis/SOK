@@ -66,6 +66,7 @@ const CRITERIA_LABELS: Record<string, string> = {
   experience: 'Опыт',
   work_format: 'Формат работы',
 };
+const CRITERIA_ORDER: Array<keyof typeof CRITERIA_LABELS> = ['skills', 'specialization', 'location', 'salary', 'experience', 'work_format'];
 
 function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -156,6 +157,31 @@ function buildTooltipRow(item: NonNullable<VacancyResponse['score_breakdown']>[n
 
   const label = CRITERIA_LABELS[criterion] ?? 'Критерий';
   return { matched: item.matched, text: item.matched ? `${label} подходит` : `${label} не подходит` };
+}
+
+function buildFallbackTooltipRow(criterion: keyof typeof CRITERIA_LABELS): { text: string; matched: boolean } {
+  switch (criterion) {
+    case 'skills':
+      return { matched: false, text: 'Навыков недостаточно (0 из 0)' };
+    case 'specialization':
+      return { matched: false, text: 'Специализация не подходит' };
+    case 'location':
+      return { matched: false, text: 'Локация не совпадает' };
+    case 'salary':
+      return { matched: false, text: 'Зарплата не указана или не подходит' };
+    case 'experience':
+      return { matched: false, text: 'Недостаточно опыта' };
+    case 'work_format':
+      return { matched: false, text: 'Формат работы не совпадает' };
+    default:
+      return { matched: false, text: 'Критерий не совпадает' };
+  }
+}
+
+function getShortCandidateName(candidateName?: string | null): string {
+  if (!candidateName) return 'Кандидат без имени';
+  const [firstName] = candidateName.trim().split(/\s+/);
+  return firstName || 'Кандидат без имени';
 }
 
 export function VacancyDetailsPage() {
@@ -432,7 +458,7 @@ export function VacancyDetailsPage() {
                   <li key={response.response_id} className="candidate-card">
                     <div className="candidate-card-header">
                       <h3 className="candidate-name">
-                        #{displayIndex} {response.candidate_name ?? 'Кандидат без имени'}
+                        #{displayIndex} {getShortCandidateName(response.candidate_name)}
                       </h3>
                       <div className="score-tooltip-wrap">
                         <button
@@ -444,22 +470,27 @@ export function VacancyDetailsPage() {
                             setActiveTooltipId((prev) => (prev === response.response_id ? null : response.response_id))
                           }
                         >
-                          !
+                          <span className="score-info-main">!</span>
                         </button>
+                        <span className="score-info-hover-hint" aria-hidden="true">
+                          ↺
+                        </span>
                         <span className={getScoreBadgeClass(response.score)}>{formatScoreValue(response.score)}</span>
                         <div className={`score-tooltip ${activeTooltipId === response.response_id ? 'score-tooltip-visible' : ''}`} role="tooltip">
                           <h4>Разбор совпадения</h4>
                           {Array.isArray(response.score_breakdown) && response.score_breakdown.length > 0 ? (
                             <ul>
-                              {response.score_breakdown.map((item, idx) => {
-                                const row = buildTooltipRow(item);
+                              {CRITERIA_ORDER.map((criterion, idx) => {
+                                const item = response.score_breakdown?.find((breakdownItem) => breakdownItem.criterion === criterion);
+                                const row = item ? buildTooltipRow(item) : buildFallbackTooltipRow(criterion);
+                                const hasPartialSpecialization = item ? item.points > 0 && !item.matched : false;
                                 const isPartial =
-                                  (item.criterion === 'location' && row.text.includes('удалённая работа')) ||
-                                  (item.criterion === 'specialization' && item.points > 0 && !item.matched);
+                                  (criterion === 'location' && row.text.includes('удалённая работа')) ||
+                                  (criterion === 'specialization' && hasPartialSpecialization);
                                 const icon = isPartial ? '~' : row.matched ? '✔' : '✖';
                                 const iconClass = isPartial ? 'match partial' : row.matched ? 'match ok' : 'match fail';
                                 return (
-                                  <li key={`${response.response_id}-${item.criterion}-${idx}`}>
+                                  <li key={`${response.response_id}-${criterion}-${idx}`}>
                                     <span className={iconClass}>{icon}</span>
                                     <span className="tooltip-label">{row.text}</span>
                                   </li>
