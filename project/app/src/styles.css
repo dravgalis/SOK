@@ -503,9 +503,21 @@ p {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   cursor: help;
-  padding: 0;
+  padding: 0 4px 0 3px;
   line-height: 1;
+}
+
+.score-info-main {
+  line-height: 1;
+}
+
+.score-info-hover-hint {
+  color: var(--primary);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.9;
 }
 
 .score-info-main {
