@@ -103,6 +103,7 @@ def _ensure_column(connection: Connection, table: str, column: str, definition: 
 
     connection.execute(text(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}'))
 
+    connection.execute(text(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}'))
 
 def upsert_hh_user(
     *,
@@ -277,6 +278,7 @@ def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], ca
                     'cached_at': cached_at,
                 },
             )
+        ).mappings()
 
 
 def get_cached_vacancy_responses(hh_id: str, vacancy_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
