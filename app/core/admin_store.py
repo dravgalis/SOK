@@ -92,6 +92,13 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
 
+def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
+    if ENGINE.dialect.name == 'sqlite':
+        rows = connection.execute(text(f'PRAGMA table_info({table})')).fetchall()
+        names = {row[1] for row in rows}
+        if column not in names:
+            connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {definition}'))
+        return
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
     if ENGINE.dialect.name == 'sqlite':
@@ -277,6 +284,37 @@ def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], ca
                     'cached_at': cached_at,
                 },
             )
+        ).mappings()
+
+        return [dict(row) for row in rows]
+
+
+def get_users_with_tokens() -> list[dict[str, str | int | None]]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(text('SELECT hh_id, access_token, metrics_updated_at FROM users')).mappings()
+        return [dict(row) for row in rows]
+
+
+def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count: int, responses_count: int) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text(
+                '''
+                UPDATE users
+                SET company_name = :company_name, vacancies_count = :vacancies_count,
+                    responses_count = :responses_count, metrics_updated_at = :metrics_updated_at
+                WHERE hh_id = :hh_id
+                '''
+            ),
+            {
+                'company_name': company_name,
+                'vacancies_count': vacancies_count,
+                'responses_count': responses_count,
+                'metrics_updated_at': timestamp,
+                'hh_id': hh_id,
+            },
+        )
 
 
 def get_cached_vacancy_responses(hh_id: str, vacancy_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
