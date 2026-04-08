@@ -65,6 +65,24 @@ def init_users_table() -> None:
                 '''
             )
         )
+        connection.execute(
+            text(
+                '''
+                CREATE TABLE IF NOT EXISTS vacancy_responses_cache (
+                    hh_id TEXT NOT NULL,
+                    vacancy_id TEXT NOT NULL,
+                    response_id TEXT NOT NULL,
+                    candidate_name TEXT,
+                    specialization TEXT,
+                    experience TEXT,
+                    matched_skills_count INTEGER NOT NULL DEFAULT 0,
+                    score_points INTEGER NOT NULL DEFAULT 0,
+                    cached_at TEXT NOT NULL,
+                    PRIMARY KEY (hh_id, vacancy_id, response_id)
+                )
+                '''
+            )
+        )
         _ensure_column(connection, 'users', 'company_name', 'TEXT')
         _ensure_column(connection, 'users', 'vacancies_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
@@ -74,6 +92,13 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
 
+def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
+    if ENGINE.dialect.name == 'sqlite':
+        rows = connection.execute(text(f'PRAGMA table_info({table})')).fetchall()
+        names = {row[1] for row in rows}
+        if column not in names:
+            connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {definition}'))
+        return
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
     if ENGINE.dialect.name == 'sqlite':
@@ -256,6 +281,113 @@ def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], ca
                     'vacancy_name': str(vacancy.get('name', 'Без названия')),
                     'vacancy_status': str(vacancy.get('status', 'active')),
                     'responses_count': int(vacancy.get('responses_count', 0)),
+                    'cached_at': cached_at,
+                },
+            )
+        ).mappings()
+
+        return [dict(row) for row in rows]
+
+
+def get_users_with_tokens() -> list[dict[str, str | int | None]]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(text('SELECT hh_id, access_token, metrics_updated_at FROM users')).mappings()
+        return [dict(row) for row in rows]
+
+
+def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count: int, responses_count: int) -> None:
+    timestamp = datetime.now(timezone.utc).isoformat()
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text(
+                '''
+                UPDATE users
+                SET company_name = :company_name, vacancies_count = :vacancies_count,
+                    responses_count = :responses_count, metrics_updated_at = :metrics_updated_at
+                WHERE hh_id = :hh_id
+                '''
+            ),
+            {
+                'company_name': company_name,
+                'vacancies_count': vacancies_count,
+                'responses_count': responses_count,
+                'metrics_updated_at': timestamp,
+                'hh_id': hh_id,
+            },
+        )
+
+
+def get_cached_vacancy_responses(hh_id: str, vacancy_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
+    with ENGINE.connect() as connection:
+        cached_at_row = connection.execute(
+            text(
+                '''
+                SELECT MAX(cached_at) AS cached_at
+                FROM vacancy_responses_cache
+                WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
+                '''
+            ),
+            {'hh_id': hh_id, 'vacancy_id': vacancy_id},
+        ).first()
+        cached_at = cached_at_row[0] if cached_at_row and isinstance(cached_at_row[0], str) else None
+
+        rows = connection.execute(
+            text(
+                '''
+                SELECT response_id, candidate_name, specialization, experience, matched_skills_count, score_points
+                FROM vacancy_responses_cache
+                WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
+                ORDER BY score_points DESC, candidate_name ASC
+                '''
+            ),
+            {'hh_id': hh_id, 'vacancy_id': vacancy_id},
+        ).mappings()
+
+        items = [
+            {
+                'response_id': row['response_id'],
+                'name': row['candidate_name'],
+                'specialization': row['specialization'],
+                'experience': row['experience'],
+                'matched_skills_count': row['matched_skills_count'],
+                'score_points': row['score_points'],
+            }
+            for row in rows
+        ]
+        return cached_at, items
+
+
+def replace_vacancy_responses(
+    hh_id: str, vacancy_id: str, responses: list[dict[str, str | int]], cached_at: str
+) -> None:
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text('DELETE FROM vacancy_responses_cache WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id'),
+            {'hh_id': hh_id, 'vacancy_id': vacancy_id},
+        )
+        for row in responses:
+            connection.execute(
+                text(
+                    '''
+                    INSERT INTO vacancy_responses_cache (
+                        hh_id, vacancy_id, response_id, candidate_name, specialization, experience,
+                        matched_skills_count, score_points, cached_at
+                    )
+                    VALUES (
+                        :hh_id, :vacancy_id, :response_id, :candidate_name, :specialization, :experience,
+                        :matched_skills_count, :score_points, :cached_at
+                    )
+                    '''
+                ),
+                {
+                    'hh_id': hh_id,
+                    'vacancy_id': vacancy_id,
+                    'response_id': str(row.get('response_id', '')),
+                    'candidate_name': str(row.get('name', '')),
+                    'specialization': str(row.get('specialization', '')),
+                    'experience': str(row.get('experience', '')),
+                    'matched_skills_count': int(row.get('matched_skills_count', 0)),
+                    'score_points': int(row.get('score_points', 0)),
                     'cached_at': cached_at,
                 },
             )

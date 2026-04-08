@@ -125,6 +125,7 @@ export function AdminUserDetailsPage() {
                 <th>Vacancy</th>
                 <th>Status</th>
                 <th>Responses</th>
+                <th>Отклики</th>
               </tr>
             </thead>
             <tbody>
@@ -133,6 +134,14 @@ export function AdminUserDetailsPage() {
                   <td>{row.name}</td>
                   <td>{row.status === 'active' ? 'Active' : 'Archived'}</td>
                   <td>{row.responses_count}</td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => navigate(ADMIN_ROUTES.vacancyResponses(hhId ?? '', row.id))}
+                    >
+                      Открыть
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

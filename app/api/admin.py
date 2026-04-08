@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -9,13 +10,16 @@ from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_resp
 from ..core.admin_store import (
     get_all_users,
     get_cached_user_vacancies,
+    get_cached_vacancy_responses,
     get_user_access_token,
     get_users_with_tokens,
     replace_user_vacancies,
+    replace_vacancy_responses,
     update_user_metrics,
 )
 
 router = APIRouter(prefix='/admin', tags=['admin'])
+SKILLS_MATCH_RE = re.compile(r'Совпало\s+(?P<matched>\d+)\s+из', flags=re.IGNORECASE)
 
 
 class AdminLoginRequest(BaseModel):
@@ -69,7 +73,7 @@ async def admin_user_vacancies(
     _require_admin_token(authorization)
 
     cached_at, cached_vacancies = get_cached_user_vacancies(hh_id)
-    if not force and cached_at and not _is_cache_expired(cached_at, minutes=30):
+    if not force:
         return {'hh_id': hh_id, 'vacancies': cached_vacancies, 'cached_at': cached_at, 'source': 'cache'}
 
     access_token = get_user_access_token(hh_id)
@@ -85,6 +89,43 @@ async def admin_user_vacancies(
     refreshed_at = datetime.now(timezone.utc).isoformat()
     replace_user_vacancies(hh_id, vacancies, refreshed_at)
     return {'hh_id': hh_id, 'vacancies': vacancies, 'cached_at': refreshed_at, 'source': 'hh'}
+
+
+@router.get('/users/{hh_id}/vacancies/{vacancy_id}/responses')
+async def admin_vacancy_responses(
+    hh_id: str,
+    vacancy_id: str,
+    authorization: str | None = Header(default=None),
+    force: bool = Query(default=False),
+) -> dict[str, object]:
+    _require_admin_token(authorization)
+
+    cached_at, cached_responses = get_cached_vacancy_responses(hh_id, vacancy_id)
+    if not force:
+        return {
+            'hh_id': hh_id,
+            'vacancy_id': vacancy_id,
+            'responses': cached_responses,
+            'cached_at': cached_at,
+            'source': 'cache',
+        }
+
+    access_token = get_user_access_token(hh_id)
+    if not access_token:
+        raise HTTPException(status_code=404, detail='User token not found.')
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        responses_payload = await _fetch_all_responses(client, access_token=access_token, vacancy_id=vacancy_id)
+    rows = _normalize_admin_responses(responses_payload)
+    refreshed_at = datetime.now(timezone.utc).isoformat()
+    replace_vacancy_responses(hh_id, vacancy_id, rows, refreshed_at)
+    return {
+        'hh_id': hh_id,
+        'vacancy_id': vacancy_id,
+        'responses': rows,
+        'cached_at': refreshed_at,
+        'source': 'hh',
+    }
 
 
 async def _refresh_metrics_for_stale_users() -> None:
@@ -125,14 +166,58 @@ def _needs_refresh(metrics_updated_at: str | int | None) -> bool:
     return datetime.now(timezone.utc) - updated_at >= timedelta(seconds=10)
 
 
-def _is_cache_expired(cached_at: str, *, minutes: int) -> bool:
-    try:
-        parsed = datetime.fromisoformat(cached_at)
-    except ValueError:
-        return True
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - parsed >= timedelta(minutes=minutes)
+def _normalize_admin_responses(payload: dict[str, object]) -> list[dict[str, str | int]]:
+    items = payload.get('items')
+    if not isinstance(items, list):
+        return []
+
+    normalized_rows: list[dict[str, str | int]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        breakdown = item.get('score_breakdown')
+        breakdown_rows = breakdown if isinstance(breakdown, list) else []
+        normalized_rows.append(
+            {
+                'response_id': str(item.get('response_id') or ''),
+                'name': str(item.get('candidate_name') or 'Без имени'),
+                'specialization': str(item.get('resume_title') or '—'),
+                'experience': _extract_experience_value(breakdown_rows),
+                'matched_skills_count': _extract_skills_matches(breakdown_rows),
+                'score_points': int(item.get('score') or 0),
+            }
+        )
+    return normalized_rows
+
+
+def _extract_experience_value(score_breakdown: list[object]) -> str:
+    for row in score_breakdown:
+        if not isinstance(row, dict):
+            continue
+        if row.get('criterion') != 'experience':
+            continue
+        reason = row.get('reason')
+        if isinstance(reason, str) and reason:
+            return reason
+    return '—'
+
+
+def _extract_skills_matches(score_breakdown: list[object]) -> int:
+    for row in score_breakdown:
+        if not isinstance(row, dict):
+            continue
+        if row.get('criterion') != 'skills':
+            continue
+        reason = row.get('reason')
+        if not isinstance(reason, str) or not reason:
+            return 0
+        if reason.startswith('Совпали навыки:'):
+            parts = [part.strip() for part in reason.removeprefix('Совпали навыки:').split(',') if part.strip()]
+            return len(parts)
+        match = SKILLS_MATCH_RE.search(reason)
+        if match:
+            return int(match.group('matched'))
+    return 0
 
 
 async def _load_hh_metrics(client: httpx.AsyncClient, access_token: str) -> tuple[str | None, int, int]:
