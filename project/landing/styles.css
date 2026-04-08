@@ -280,11 +280,21 @@ p {
   text-align: center;
   color: #cbd5e1;
   padding: 20px;
+  overflow: hidden;
 }
 
-.placeholder-title {
-  font-weight: 700;
-  color: #f8fafc;
+.image-mock img,
+.screenshot-placeholder img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 12px;
+  display: block;
+}
+
+.image-mock-compact {
+  min-height: 140px;
+  margin-top: 16px;
 }
 
 .pricing-grid {
