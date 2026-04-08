@@ -278,7 +278,6 @@ def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], ca
                     'cached_at': cached_at,
                 },
             )
-        ).mappings()
 
 
 def get_cached_vacancy_responses(hh_id: str, vacancy_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
