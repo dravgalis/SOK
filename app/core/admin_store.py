@@ -92,13 +92,6 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
 
-def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
-    if ENGINE.dialect.name == 'sqlite':
-        rows = connection.execute(text(f'PRAGMA table_info({table})')).fetchall()
-        names = {row[1] for row in rows}
-        if column not in names:
-            connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {definition}'))
-        return
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
     if ENGINE.dialect.name == 'sqlite':
@@ -110,6 +103,7 @@ def _ensure_column(connection: Connection, table: str, column: str, definition: 
 
     connection.execute(text(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}'))
 
+    connection.execute(text(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {definition}'))
 
 def upsert_hh_user(
     *,
@@ -286,62 +280,28 @@ def replace_user_vacancies(hh_id: str, vacancies: list[dict[str, str | int]], ca
             )
         ).mappings()
 
-        return [dict(row) for row in rows]
-
-
-def get_users_with_tokens() -> list[dict[str, str | int | None]]:
-    with ENGINE.connect() as connection:
-        rows = connection.execute(text('SELECT hh_id, access_token, metrics_updated_at FROM users')).mappings()
-        return [dict(row) for row in rows]
-
-
-def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count: int, responses_count: int) -> None:
-    timestamp = datetime.now(timezone.utc).isoformat()
-    with ENGINE.begin() as connection:
-        connection.execute(
-            text(
-                '''
-                UPDATE users
-                SET company_name = :company_name, vacancies_count = :vacancies_count,
-                    responses_count = :responses_count, metrics_updated_at = :metrics_updated_at
-                WHERE hh_id = :hh_id
-                '''
-            ),
-            {
-                'company_name': company_name,
-                'vacancies_count': vacancies_count,
-                'responses_count': responses_count,
-                'metrics_updated_at': timestamp,
-                'hh_id': hh_id,
-            },
-        )
-
 
 def get_cached_vacancy_responses(hh_id: str, vacancy_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
     with ENGINE.connect() as connection:
-        cached_at_row = connection.execute(
-            text(
-                '''
-                SELECT MAX(cached_at) AS cached_at
-                FROM vacancy_responses_cache
-                WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
-                '''
-            ),
-            {'hh_id': hh_id, 'vacancy_id': vacancy_id},
-        ).first()
+        cached_at_query = text(
+            '''
+            SELECT MAX(cached_at) AS cached_at
+            FROM vacancy_responses_cache
+            WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
+            '''
+        )
+        cached_at_row = connection.execute(cached_at_query, {'hh_id': hh_id, 'vacancy_id': vacancy_id}).first()
         cached_at = cached_at_row[0] if cached_at_row and isinstance(cached_at_row[0], str) else None
 
-        rows = connection.execute(
-            text(
-                '''
-                SELECT response_id, candidate_name, specialization, experience, matched_skills_count, score_points
-                FROM vacancy_responses_cache
-                WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
-                ORDER BY score_points DESC, candidate_name ASC
-                '''
-            ),
-            {'hh_id': hh_id, 'vacancy_id': vacancy_id},
-        ).mappings()
+        rows_query = text(
+            '''
+            SELECT response_id, candidate_name, specialization, experience, matched_skills_count, score_points
+            FROM vacancy_responses_cache
+            WHERE hh_id = :hh_id AND vacancy_id = :vacancy_id
+            ORDER BY score_points DESC, candidate_name ASC
+            '''
+        )
+        rows = connection.execute(rows_query, {'hh_id': hh_id, 'vacancy_id': vacancy_id}).mappings()
 
         items = [
             {
