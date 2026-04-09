@@ -10,6 +10,10 @@ type Me = {
   avatar_url?: string | null;
   company_name?: string | null;
   company_logo_url?: string | null;
+  subscription_status?: string | null;
+  subscription_label?: string | null;
+  subscription_expires_at?: string | null;
+  subscription_days_left?: string | null;
 };
 
 type Vacancy = {
@@ -72,6 +76,17 @@ function getNormalizedStatus(tab: VacancyTabKey, vacancy: Vacancy): string {
   }
 
   return tab === 'archived' ? 'Архивная' : 'Активная';
+}
+
+function formatPlanEndDate(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  }).format(date);
 }
 
 export function DashboardPage() {
@@ -138,9 +153,9 @@ export function DashboardPage() {
   }, [theme]);
 
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
-  const currentPlan = {
-    title: 'Тест 3 дня',
-  };
+  const currentPlanTitle = me?.subscription_label || 'Тест 3 дня';
+  const planEndDate = formatPlanEndDate(me?.subscription_expires_at);
+  const planDaysLeft = me?.subscription_days_left ? `${me.subscription_days_left} дн.` : '—';
 
   const handleLogout = () => {
     window.location.assign('https://sok-app.onrender.com');
@@ -214,7 +229,9 @@ export function DashboardPage() {
                   <h3>Оплата</h3>
                   <span className="settings-label">Вид тарифа</span>
                   <div className="settings-plan-card">
-                    <strong>{currentPlan.title}</strong>
+                    <strong>{currentPlanTitle}</strong>
+                    <span>Заканчивается: {planEndDate}</span>
+                    <span>Осталось: {planDaysLeft}</span>
                   </div>
 
                   <button type="button" className="settings-secondary-button">

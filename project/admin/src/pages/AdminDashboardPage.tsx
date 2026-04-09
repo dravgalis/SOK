@@ -14,6 +14,19 @@ type AdminUser = {
   last_login: string;
 };
 
+function getAdminPeriodLabel(status: string | null): string {
+  if (!status) return '—';
+
+  const labelMap: Record<string, string> = {
+    trial_3d: 'Тест 3 дня',
+    paid_1m: 'Оплачено: 1 месяц',
+    paid_6m: 'Оплачено: 6 месяцев',
+    paid_1y: 'Оплачено: 1 год',
+  };
+
+  return labelMap[status] ?? status;
+}
+
 export function AdminDashboardPage() {
   const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -74,8 +87,8 @@ export function AdminDashboardPage() {
                 <th>Company</th>
                 <th>User</th>
                 <th>Last login</th>
-                <th>Subscription status</th>
-                <th>Subscription ends</th>
+                <th>Period type</th>
+                <th>Period ends</th>
                 <th>Selected interface</th>
                 <th>Account</th>
               </tr>
@@ -86,7 +99,7 @@ export function AdminDashboardPage() {
                   <td>{user.company_name ?? '—'}</td>
                   <td>{user.name}</td>
                   <td>{new Date(user.last_login).toLocaleString()}</td>
-                  <td>{user.subscription_status ?? '—'}</td>
+                  <td>{getAdminPeriodLabel(user.subscription_status)}</td>
                   <td>
                     {user.subscription_expires_at ? new Date(user.subscription_expires_at).toLocaleDateString() : '—'}
                   </td>

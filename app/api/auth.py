@@ -1,13 +1,13 @@
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 
-from ..core.admin_store import upsert_hh_user
+from ..core.admin_store import get_user_subscription, upsert_hh_user
 
 router = APIRouter()
 
@@ -143,6 +143,8 @@ def _track_hh_user_login(
     email_raw = payload.get('email')
     email = email_raw if isinstance(email_raw, str) and email_raw else None
 
+    subscription_status, subscription_expires_at = _resolve_subscription_for_login(hh_id)
+
     upsert_hh_user(
         hh_id=hh_id,
         name=name,
@@ -150,12 +152,29 @@ def _track_hh_user_login(
         company_name=company_name,
         vacancies_count=vacancies_count,
         responses_count=responses_count,
-        subscription_status=None,
-        subscription_expires_at=None,
+        subscription_status=subscription_status,
+        subscription_expires_at=subscription_expires_at,
         selected_interface='hh',
         access_token=access_token,
         metrics_updated_at=datetime.now(timezone.utc).isoformat(),
     )
+
+
+def _resolve_subscription_for_login(hh_id: str) -> tuple[str | None, str | None]:
+    now = datetime.now(timezone.utc)
+    existing_status, existing_expires_at = get_user_subscription(hh_id)
+
+    if existing_status and existing_expires_at:
+        try:
+            expires_at = datetime.fromisoformat(existing_expires_at)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            return existing_status, expires_at.isoformat()
+        except ValueError:
+            pass
+
+    trial_expires_at = now + timedelta(days=3)
+    return 'trial_3d', trial_expires_at.isoformat()
 
 
 async def _load_hh_metrics(
