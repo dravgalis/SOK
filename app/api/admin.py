@@ -15,6 +15,7 @@ from ..core.admin_store import (
     get_users_with_tokens,
     replace_user_vacancies,
     replace_vacancy_responses,
+    update_user_subscription,
     update_user_metrics,
 )
 
@@ -25,6 +26,11 @@ SKILLS_MATCH_RE = re.compile(r'Совпало\s+(?P<matched>\d+)\s+из', flags=
 class AdminLoginRequest(BaseModel):
     login: str
     password: str
+
+
+class AdminSubscriptionUpdateRequest(BaseModel):
+    period_type: str
+    period_ends_on: str | None = None
 
 
 def _admin_token() -> str:
@@ -62,6 +68,44 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
     _require_admin_token(authorization)
     await _refresh_metrics_for_stale_users()
     return get_all_users()
+
+
+@router.patch('/users/{hh_id}/subscription')
+async def admin_update_user_subscription(
+    hh_id: str,
+    payload: AdminSubscriptionUpdateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str | None]:
+    _require_admin_token(authorization)
+
+    allowed_period_types = {'trial_3d', 'paid_1m', 'paid_6m', 'paid_1y'}
+    period_type = payload.period_type.strip()
+    if period_type not in allowed_period_types:
+        raise HTTPException(status_code=400, detail='Invalid period type.')
+
+    period_ends_at: str | None = None
+    if payload.period_ends_on:
+        date_raw = payload.period_ends_on.strip()
+        try:
+            period_date = datetime.strptime(date_raw, '%Y-%m-%d').date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail='period_ends_on must be YYYY-MM-DD.') from exc
+
+        period_ends_at = datetime.combine(period_date, datetime.max.time(), tzinfo=timezone.utc).isoformat()
+
+    updated = update_user_subscription(
+        hh_id=hh_id,
+        subscription_status=period_type,
+        subscription_expires_at=period_ends_at,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail='User not found.')
+
+    return {
+        'hh_id': hh_id,
+        'subscription_status': period_type,
+        'subscription_expires_at': period_ends_at,
+    }
 
 
 @router.get('/users/{hh_id}/vacancies')

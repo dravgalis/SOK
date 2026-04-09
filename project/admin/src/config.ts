@@ -1,6 +1,7 @@
 export const ADMIN_API = {
   login: 'https://sok-i9cq.onrender.com/admin/login',
   users: 'https://sok-i9cq.onrender.com/admin/users',
+  userSubscription: (hhId: string) => `https://sok-i9cq.onrender.com/admin/users/${hhId}/subscription`,
   userVacancies: (hhId: string, force = false) =>
     `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies${force ? '?force=true' : ''}`,
   vacancyResponses: (hhId: string, vacancyId: string, force = false) =>

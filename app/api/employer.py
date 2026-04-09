@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from html import unescape
 from urllib.parse import urlparse
@@ -10,6 +11,8 @@ from urllib.parse import unquote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
+
+from ..core.admin_store import get_user_subscription
 
 router = APIRouter()
 
@@ -114,13 +117,49 @@ async def get_me(request: Request) -> dict[str, str | None]:
             company_name = employer_payload.get('name') if isinstance(employer_payload.get('name'), str) else None
             company_logo_url = _extract_logo_url(employer_payload)
 
+    hh_id = str(me_payload.get('id', '')).strip()
+    subscription_status, subscription_expires_at = get_user_subscription(hh_id) if hh_id else (None, None)
+    subscription_label = _format_subscription_label(subscription_status)
+    subscription_days_left = _calculate_days_left(subscription_expires_at)
+
     return {
+        'id': hh_id or None,
         'user_name': _extract_user_name(me_payload),
         'company_name': company_name,
         'company_logo_url': company_logo_url,
         'manager_id': manager_id,
         'employer_id': employer_id,
+        'subscription_status': subscription_status,
+        'subscription_label': subscription_label,
+        'subscription_expires_at': subscription_expires_at,
+        'subscription_days_left': subscription_days_left,
     }
+
+
+def _format_subscription_label(status: str | None) -> str | None:
+    mapping = {
+        'trial_3d': 'Тест 3 дня',
+        'paid_1m': 'Подписка 1 месяц',
+        'paid_6m': 'Подписка 6 месяцев',
+        'paid_1y': 'Подписка 1 год',
+    }
+    return mapping.get(status) if status else None
+
+
+def _calculate_days_left(expires_at_iso: str | None) -> str | None:
+    if not expires_at_iso:
+        return None
+    try:
+        expires_at = datetime.fromisoformat(expires_at_iso)
+    except ValueError:
+        return None
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    days_left = (expires_at.date() - now.date()).days
+    return str(max(days_left, 0))
 
 
 @router.get('/vacancies')
