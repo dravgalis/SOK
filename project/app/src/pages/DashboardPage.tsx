@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { APP_ENDPOINTS } from '../config';
+import { APP_ENDPOINTS, AUTH_ENDPOINTS } from '../config';
 
 type Me = {
   id: string;
@@ -24,6 +24,8 @@ type Vacancy = {
 };
 
 type VacancyTabKey = 'active' | 'archived';
+type ThemeKey = 'default';
+type PlanType = 'trial' | 'subscription';
 
 type VacanciesPayload = {
   active: Vacancy[];
@@ -84,6 +86,10 @@ export function DashboardPage() {
     archived: 0,
   });
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeKey>('default');
+  const [planType, setPlanType] = useState<PlanType>('trial');
+  const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -128,7 +134,17 @@ export function DashboardPage() {
     void loadData();
   }, []);
 
+  useEffect(() => {
+    document.body.classList.remove('theme-default');
+    document.body.classList.add(`theme-${theme}`);
+  }, [theme]);
+
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
+  const planLabel = planType === 'trial' ? 'Тест 3 дня' : 'Подписка до 30 апреля 2026';
+
+  const handleLogout = () => {
+    window.location.assign(AUTH_ENDPOINTS.hhLogin);
+  };
 
   if (loading) {
     return (
@@ -153,16 +169,89 @@ export function DashboardPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
-        <div className="profile-header-company">
-          {me?.company_logo_url ? (
-            <img src={me.company_logo_url} alt={companyName} className="avatar avatar-company" />
-          ) : (
-            <div className="avatar avatar-fallback avatar-company">{companyName.slice(0, 1).toUpperCase()}</div>
-          )}
+        <div className="profile-header-row">
+          <div className="profile-header-company">
+            {me?.company_logo_url ? (
+              <img src={me.company_logo_url} alt={companyName} className="avatar avatar-company" />
+            ) : (
+              <div className="avatar avatar-fallback avatar-company">{companyName.slice(0, 1).toUpperCase()}</div>
+            )}
 
-          <div className="profile-header-content">
-            <p className="profile-header-label">Работодатель</p>
-            <h1>{companyName}</h1>
+            <div className="profile-header-content">
+              <p className="profile-header-label">Работодатель</p>
+              <h1>{companyName}</h1>
+            </div>
+          </div>
+
+          <div className="settings-wrap">
+            <button
+              type="button"
+              className="settings-trigger"
+              onClick={() => setIsSettingsOpen((value) => !value)}
+              aria-expanded={isSettingsOpen}
+              aria-label="Открыть настройки"
+            >
+              <span aria-hidden>⚙️</span>
+            </button>
+
+            {isSettingsOpen ? (
+              <div className="settings-menu">
+                <section className="settings-section">
+                  <h3>Тема</h3>
+                  <label className="settings-label" htmlFor="theme-select">
+                    Текущая тема
+                  </label>
+                  <select
+                    id="theme-select"
+                    className="settings-select"
+                    value={theme}
+                    onChange={(event) => setTheme(event.target.value as ThemeKey)}
+                  >
+                    <option value="default">Белая</option>
+                  </select>
+                </section>
+
+                <section className="settings-section">
+                  <h3>Оплата</h3>
+                  <label className="settings-label" htmlFor="plan-type-select">
+                    Вид тарифа
+                  </label>
+                  <select
+                    id="plan-type-select"
+                    className="settings-select"
+                    value={planType}
+                    onChange={(event) => setPlanType(event.target.value as PlanType)}
+                  >
+                    <option value="trial">Тест 3 дня</option>
+                    <option value="subscription">Подписка до 30 апреля 2026</option>
+                  </select>
+
+                  <p className="settings-plan">{planLabel}</p>
+
+                  <button type="button" className="settings-secondary-button">
+                    Продлить
+                  </button>
+
+                  <div className="settings-toggle-row">
+                    <span>Автоплатеж</span>
+                    <button
+                      type="button"
+                      className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''}`}
+                      onClick={() => setIsAutoPayEnabled((value) => !value)}
+                      aria-pressed={isAutoPayEnabled}
+                    >
+                      <span className="toggle-switch-thumb" />
+                    </button>
+                  </div>
+                </section>
+
+                <section className="settings-section">
+                  <button type="button" className="settings-logout-button" onClick={handleLogout}>
+                    Выйти из аккаунта
+                  </button>
+                </section>
+              </div>
+            ) : null}
           </div>
         </div>
 
