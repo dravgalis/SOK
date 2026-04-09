@@ -237,6 +237,26 @@ def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     return status_value, expires_value
 
 
+def update_user_subscription(*, hh_id: str, subscription_status: str | None, subscription_expires_at: str | None) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE users
+                SET subscription_status = :subscription_status,
+                    subscription_expires_at = :subscription_expires_at
+                WHERE hh_id = :hh_id
+                '''
+            ),
+            {
+                'hh_id': hh_id,
+                'subscription_status': subscription_status,
+                'subscription_expires_at': subscription_expires_at,
+            },
+        )
+        return result.rowcount > 0
+
+
 def get_cached_user_vacancies(hh_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
     with ENGINE.connect() as connection:
         cached_at_row = connection.execute(
