@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { APP_ENDPOINTS } from '../config';
+import { APP_ENDPOINTS, AUTH_ENDPOINTS } from '../config';
 
 type Me = {
   id: string;
