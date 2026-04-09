@@ -220,6 +220,23 @@ def get_user_access_token(hh_id: str) -> str | None:
     return token if isinstance(token, str) and token else None
 
 
+def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text('SELECT subscription_status, subscription_expires_at FROM users WHERE hh_id = :hh_id'),
+            {'hh_id': hh_id},
+        ).first()
+
+    if row is None:
+        return None, None
+
+    status_raw = row[0]
+    expires_raw = row[1]
+    status_value = status_raw if isinstance(status_raw, str) and status_raw else None
+    expires_value = expires_raw if isinstance(expires_raw, str) and expires_raw else None
+    return status_value, expires_value
+
+
 def get_cached_user_vacancies(hh_id: str) -> tuple[str | None, list[dict[str, str | int]]]:
     with ENGINE.connect() as connection:
         cached_at_row = connection.execute(
