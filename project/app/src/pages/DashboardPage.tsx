@@ -25,7 +25,6 @@ type Vacancy = {
 
 type VacancyTabKey = 'active' | 'archived';
 type ThemeKey = 'default';
-type PlanType = 'trial' | 'subscription';
 
 type VacanciesPayload = {
   active: Vacancy[];
@@ -88,7 +87,6 @@ export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeKey>('default');
-  const [planType, setPlanType] = useState<PlanType>('trial');
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -140,7 +138,10 @@ export function DashboardPage() {
   }, [theme]);
 
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
-  const planLabel = planType === 'trial' ? 'Тест 3 дня' : 'Подписка до 30 апреля 2026';
+  const currentPlan = {
+    title: 'Тест 3 дня',
+    period: 'Период выставляется автоматически после регистрации или оплаты',
+  };
 
   const handleLogout = () => {
     window.location.assign(AUTH_ENDPOINTS.hhLogin);
@@ -198,35 +199,25 @@ export function DashboardPage() {
               <div className="settings-menu">
                 <section className="settings-section">
                   <h3>Тема</h3>
-                  <label className="settings-label" htmlFor="theme-select">
-                    Текущая тема
-                  </label>
-                  <select
-                    id="theme-select"
-                    className="settings-select"
-                    value={theme}
-                    onChange={(event) => setTheme(event.target.value as ThemeKey)}
+                  <span className="settings-label">Текущая тема</span>
+                  <button
+                    type="button"
+                    className={`theme-swatch ${theme === 'default' ? 'theme-swatch-active' : ''}`}
+                    onClick={() => setTheme('default')}
+                    aria-label="Белая тема"
+                    title="Белая тема"
                   >
-                    <option value="default">Белая</option>
-                  </select>
+                    <span className="theme-swatch-preview" />
+                  </button>
                 </section>
 
                 <section className="settings-section">
                   <h3>Оплата</h3>
-                  <label className="settings-label" htmlFor="plan-type-select">
-                    Вид тарифа
-                  </label>
-                  <select
-                    id="plan-type-select"
-                    className="settings-select"
-                    value={planType}
-                    onChange={(event) => setPlanType(event.target.value as PlanType)}
-                  >
-                    <option value="trial">Тест 3 дня</option>
-                    <option value="subscription">Подписка до 30 апреля 2026</option>
-                  </select>
-
-                  <p className="settings-plan">{planLabel}</p>
+                  <span className="settings-label">Вид тарифа</span>
+                  <div className="settings-plan-card">
+                    <strong>{currentPlan.title}</strong>
+                    <p>{currentPlan.period}</p>
+                  </div>
 
                   <button type="button" className="settings-secondary-button">
                     Продлить

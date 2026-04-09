@@ -220,13 +220,41 @@ p {
   color: var(--muted);
 }
 
-.settings-select {
-  width: 100%;
+.theme-swatch {
+  width: 44px;
+  height: 44px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--card);
-  color: var(--text);
-  padding: 9px 10px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.theme-swatch-preview {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(135deg, #ffffff 50%, #e2e8f0 50%);
+}
+
+.theme-swatch-active {
+  border-color: var(--primary);
+  background: var(--surface-soft);
+}
+
+.settings-plan-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.settings-plan-card strong {
+  font-size: 0.95rem;
 }
 
 .settings-plan {
