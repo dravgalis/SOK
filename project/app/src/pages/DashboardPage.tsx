@@ -140,11 +140,10 @@ export function DashboardPage() {
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const currentPlan = {
     title: 'Тест 3 дня',
-    period: 'Период выставляется автоматически после регистрации или оплаты',
   };
 
   const handleLogout = () => {
-    window.location.assign(AUTH_ENDPOINTS.hhLogin);
+    window.location.assign('https://sok-app.onrender.com');
   };
 
   if (loading) {
@@ -216,7 +215,6 @@ export function DashboardPage() {
                   <span className="settings-label">Вид тарифа</span>
                   <div className="settings-plan-card">
                     <strong>{currentPlan.title}</strong>
-                    <p>{currentPlan.period}</p>
                   </div>
 
                   <button type="button" className="settings-secondary-button">
