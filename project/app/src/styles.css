@@ -61,8 +61,13 @@ body::after {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: -1;
+  z-index: 0;
   opacity: 0;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
 }
 
 body.theme-default {
@@ -127,6 +132,9 @@ body.theme-mint {
   --border: #b8ddd0;
   --surface-neutral: #cfeadf;
   --surface-tab-count: #b4dece;
+  background: linear-gradient(130deg, #eaf7f2, #d1fae5, #ecfeff, #d1fae5);
+  background-size: 400% 400%;
+  animation: gradientMove 12s ease infinite;
 }
 
 body.theme-lavender {
@@ -140,6 +148,9 @@ body.theme-lavender {
   --border: #d9c6ff;
   --surface-neutral: #e9ddff;
   --surface-tab-count: #d8b4fe;
+  background: linear-gradient(130deg, #f5f1ff, #ede9fe, #e9d5ff, #ede9fe);
+  background-size: 400% 400%;
+  animation: gradientMove 11s ease infinite;
 }
 
 body.theme-sunset {
@@ -153,6 +164,9 @@ body.theme-sunset {
   --border: #ffd2b8;
   --surface-neutral: #ffe3d2;
   --surface-tab-count: #fdba74;
+  background: linear-gradient(130deg, #fff4ea, #ffedd5, #fed7aa, #ffedd5);
+  background-size: 400% 400%;
+  animation: gradientMove 10s ease infinite;
 }
 
 body.theme-aurora {
@@ -166,6 +180,10 @@ body.theme-aurora {
   --border: #b9def7;
   --surface-neutral: #d6efff;
   --surface-tab-count: #99f6e4;
+  background: linear-gradient(135deg, #dbeafe, #bae6fd, #99f6e4, #a5f3fc, #dbeafe);
+  background-size: 360% 360%;
+  animation: gradientMove 6s ease infinite;
+  box-shadow: inset 0 0 60px rgba(20, 184, 166, 0.17);
 }
 
 body.theme-neon {
@@ -180,6 +198,12 @@ body.theme-neon {
   --surface-subtle: #0f172a;
   --surface-soft: #111827;
   --surface-neutral: #334155;
+  background: linear-gradient(130deg, #020617, #0f172a, #0e7490, #6d28d9, #0f172a);
+  background-size: 320% 320%;
+  animation: gradientMove 5s ease infinite;
+  box-shadow:
+    inset 0 0 48px rgba(34, 211, 238, 0.16),
+    inset 0 0 80px rgba(217, 70, 239, 0.12);
 }
 
 body.theme-golden-sakura {
@@ -193,6 +217,9 @@ body.theme-golden-sakura {
   --border: #f3d58a;
   --surface-neutral: #fde68a;
   --surface-tab-count: #fcd34d;
+  background: linear-gradient(132deg, #fff7e5, #fef3c7, #fde68a, #f9a8d4, #fde68a);
+  background-size: 320% 320%;
+  animation: gradientMove 7s ease infinite;
 }
 
 body.theme-mythic-pop {
@@ -207,6 +234,12 @@ body.theme-mythic-pop {
   --surface-subtle: #1e1b4b;
   --surface-soft: #2e1065;
   --surface-neutral: #3730a3;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(244, 114, 182, 0.25), transparent 40%),
+    radial-gradient(circle at 80% 10%, rgba(56, 189, 248, 0.2), transparent 38%),
+    linear-gradient(135deg, #0f1029, #1f1147, #312e81, #be185d, #1f1147);
+  background-size: 120% 120%, 120% 120%, 280% 280%;
+  animation: mythicDepth 16s ease-in-out infinite;
 }
 
 .page {
@@ -557,37 +590,54 @@ p {
 
 .theme-preview-mint {
   border-color: #63b89a;
-  background: linear-gradient(145deg, #e7fff6 0%, #9fd9c2 48%, #2f7d67 100%);
+  background: linear-gradient(130deg, #e7fff6 0%, #9fd9c2 40%, #2f7d67 100%);
+  background-size: 280% 280%;
+  animation: gradientMove 10s ease infinite;
 }
 
 .theme-preview-lavender {
   border-color: #a78bfa;
-  background: linear-gradient(145deg, #f5efff 0%, #d8b4fe 48%, #7c3aed 100%);
+  background: linear-gradient(130deg, #f5efff 0%, #d8b4fe 40%, #7c3aed 100%);
+  background-size: 280% 280%;
+  animation: gradientMove 9s ease infinite;
 }
 
 .theme-preview-sunset {
   border-color: #fb923c;
-  background: linear-gradient(145deg, #fff1e6 0%, #fdba74 48%, #fb7185 100%);
+  background: linear-gradient(130deg, #fff1e6 0%, #fdba74 45%, #fb7185 100%);
+  background-size: 280% 280%;
+  animation: gradientMove 8s ease infinite;
 }
 
 .theme-preview-aurora {
   border-color: #5eead4;
-  background: linear-gradient(145deg, #dbeafe 0%, #99f6e4 48%, #0ea5e9 100%);
+  background: linear-gradient(130deg, #dbeafe 0%, #99f6e4 45%, #0ea5e9 100%);
+  background-size: 240% 240%;
+  animation: gradientMove 6s ease infinite, previewGlow 3s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(20, 184, 166, 0.35);
 }
 
 .theme-preview-neon {
   border-color: #22d3ee;
-  background: linear-gradient(145deg, #020617 0%, #06b6d4 48%, #d946ef 100%);
+  background: linear-gradient(130deg, #020617 0%, #06b6d4 45%, #d946ef 100%);
+  background-size: 220% 220%;
+  animation: gradientMove 5s ease infinite, neonPulse 2s ease-in-out infinite alternate;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
 }
 
 .theme-preview-golden-sakura {
   border-color: #f59e0b;
-  background: linear-gradient(145deg, #fff8dc 0%, #fcd34d 50%, #f9a8d4 100%);
+  background: linear-gradient(130deg, #fff8dc 0%, #fcd34d 45%, #f9a8d4 100%);
+  background-size: 240% 240%;
+  animation: gradientMove 7s ease infinite;
 }
 
 .theme-preview-mythic-pop {
   border-color: #a78bfa;
-  background: linear-gradient(145deg, #0f172a 0%, #7c3aed 45%, #ec4899 100%);
+  background: linear-gradient(130deg, #0f172a 0%, #7c3aed 42%, #ec4899 100%);
+  background-size: 220% 220%;
+  animation: gradientMove 4s ease infinite, mythicShift 5s ease-in-out infinite alternate;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.45);
 }
 
 .theme-paywall {
@@ -598,19 +648,21 @@ p {
 }
 
 body.theme-neon::before {
-  opacity: 0.35;
+  opacity: 0.38;
   background:
     radial-gradient(circle at 20% 20%, rgba(34, 211, 238, 0.28), transparent 35%),
     radial-gradient(circle at 80% 10%, rgba(217, 70, 239, 0.25), transparent 30%);
-  animation: neonPulse 6s ease-in-out infinite alternate;
+  animation: neonPulse 2.5s ease-in-out infinite alternate;
 }
 
 body.theme-golden-sakura::before {
-  opacity: 0.32;
+  opacity: 0.35;
   background:
+    linear-gradient(115deg, transparent 25%, rgba(255, 255, 255, 0.5) 48%, transparent 70%),
     radial-gradient(circle at 15% 18%, rgba(234, 179, 8, 0.35), transparent 30%),
     radial-gradient(circle at 72% 12%, rgba(251, 191, 36, 0.3), transparent 26%);
-  animation: glowDrift 10s linear infinite;
+  background-size: 220% 220%, 100% 100%, 100% 100%;
+  animation: goldenShimmer 7s linear infinite;
 }
 
 body.theme-golden-sakura::after {
@@ -619,7 +671,7 @@ body.theme-golden-sakura::after {
     radial-gradient(circle, rgba(244, 114, 182, 0.55) 0 20%, transparent 22%),
     radial-gradient(circle, rgba(253, 224, 71, 0.4) 0 18%, transparent 20%);
   background-size: 120px 120px, 160px 160px;
-  animation: sakuraFall 18s linear infinite;
+  animation: sakuraFall 14s linear infinite;
 }
 
 body.theme-mythic-pop::before {
@@ -628,7 +680,29 @@ body.theme-mythic-pop::before {
     radial-gradient(circle at 10% 10%, rgba(167, 139, 250, 0.35), transparent 30%),
     radial-gradient(circle at 85% 18%, rgba(244, 114, 182, 0.35), transparent 33%),
     radial-gradient(circle at 55% 80%, rgba(56, 189, 248, 0.25), transparent 36%);
-  animation: mythicShift 12s ease-in-out infinite alternate;
+  filter: blur(3px);
+  animation: mythicShift 8s ease-in-out infinite alternate;
+}
+
+body.theme-mythic-pop::after {
+  opacity: 0.2;
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.7) 0 16%, transparent 20%),
+    radial-gradient(circle, rgba(192, 132, 252, 0.7) 0 16%, transparent 20%);
+  background-size: 160px 160px, 220px 220px;
+  animation: particleFloat 16s linear infinite;
+}
+
+@keyframes gradientMove {
+  0% {
+    background-position: 0%;
+  }
+  50% {
+    background-position: 100%;
+  }
+  100% {
+    background-position: 0%;
+  }
 }
 
 @keyframes neonPulse {
@@ -642,12 +716,37 @@ body.theme-mythic-pop::before {
   }
 }
 
+@keyframes previewGlow {
+  0%,
+  100% {
+    box-shadow: 0 0 6px rgba(20, 184, 166, 0.32);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(14, 165, 233, 0.45);
+  }
+}
+
 @keyframes glowDrift {
   from {
     transform: translateX(-2%) translateY(0);
   }
   to {
     transform: translateX(2%) translateY(1.5%);
+  }
+}
+
+@keyframes goldenShimmer {
+  0% {
+    background-position:
+      -120% 0,
+      0 0,
+      0 0;
+  }
+  100% {
+    background-position:
+      140% 0,
+      0 0,
+      0 0;
   }
 }
 
@@ -670,6 +769,40 @@ body.theme-mythic-pop::before {
   }
   to {
     transform: translateY(-1.5%);
+  }
+}
+
+@keyframes mythicDepth {
+  0% {
+    background-position:
+      18% 20%,
+      80% 8%,
+      0% 50%;
+  }
+  50% {
+    background-position:
+      24% 28%,
+      72% 16%,
+      100% 50%;
+  }
+  100% {
+    background-position:
+      18% 20%,
+      80% 8%,
+      0% 50%;
+  }
+}
+
+@keyframes particleFloat {
+  from {
+    background-position:
+      0 -120px,
+      80px -200px;
+  }
+  to {
+    background-position:
+      22px 100vh,
+      -34px 105vh;
   }
 }
 
