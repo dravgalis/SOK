@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { APP_ENDPOINTS, AUTH_ENDPOINTS } from '../config';
+import { APP_ENDPOINTS } from '../config';
 
 type Me = {
   id: string;
@@ -33,6 +33,7 @@ type Vacancy = {
 
 type VacancyTabKey = 'active' | 'archived';
 type ThemeKey = 'default';
+type PlanCode = '1_month' | '6_months' | '12_months';
 
 type VacanciesPayload = {
   active: Vacancy[];
@@ -43,6 +44,12 @@ type VacanciesPayload = {
 const TAB_ITEMS: { key: VacancyTabKey; label: string }[] = [
   { key: 'active', label: 'Активные' },
   { key: 'archived', label: 'Архив' },
+];
+
+const PLAN_OPTIONS: { code: PlanCode; label: string; price: string }[] = [
+  { code: '1_month', label: '1 месяц', price: '399 ₽' },
+  { code: '6_months', label: '6 месяцев', price: '2 150 ₽' },
+  { code: '12_months', label: '12 месяцев', price: '3 799 ₽' },
 ];
 
 function formatDate(value?: string | null): string {
@@ -108,6 +115,8 @@ export function DashboardPage() {
   const [theme, setTheme] = useState<ThemeKey>('default');
   const [billing, setBilling] = useState<BillingMe | null>(null);
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
+  const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -141,6 +150,9 @@ export function DashboardPage() {
         setMe(mePayload);
         setBilling(billingPayload);
         setIsAutoPayEnabled(Boolean(billingPayload.auto_renew_enabled));
+        if (billingPayload.plan_code && isPlanCode(billingPayload.plan_code)) {
+          setSelectedPlan(billingPayload.plan_code);
+        }
         setVacanciesByTab({
           active: vacanciesPayload.active || [],
           archived: vacanciesPayload.archived || [],
@@ -173,8 +185,7 @@ export function DashboardPage() {
     window.location.assign('https://sok-app.onrender.com');
   };
 
-  const handleRenew = async () => {
-    const planCode = billing?.plan_code || '1_month';
+  const handleRenew = async (planCode: PlanCode) => {
     const response = await fetch(APP_ENDPOINTS.createPayment, {
       method: 'POST',
       credentials: 'include',
@@ -188,6 +199,7 @@ export function DashboardPage() {
     if (!payload.confirmation_url) {
       throw new Error('Платежная ссылка не получена.');
     }
+    setIsPlanSelectorOpen(false);
     window.location.href = payload.confirmation_url;
   };
 
@@ -280,9 +292,32 @@ export function DashboardPage() {
                     <span>Осталось: {planDaysLeft}</span>
                   </div>
 
-                  <button type="button" className="settings-secondary-button" onClick={() => void handleRenew()}>
+                  <button type="button" className="settings-secondary-button" onClick={() => setIsPlanSelectorOpen(true)}>
                     Продлить
                   </button>
+
+                  {isPlanSelectorOpen ? (
+                    <div className="settings-plan-card">
+                      <strong>Выберите тариф</strong>
+                      {PLAN_OPTIONS.map((plan) => (
+                        <label key={plan.code} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span>
+                            <input
+                              type="radio"
+                              name="billing-plan"
+                              checked={selectedPlan === plan.code}
+                              onChange={() => setSelectedPlan(plan.code)}
+                            />{' '}
+                            {plan.label}
+                          </span>
+                          <span>{plan.price}</span>
+                        </label>
+                      ))}
+                      <button type="button" className="settings-secondary-button" onClick={() => void handleRenew(selectedPlan)}>
+                        Перейти к оплате
+                      </button>
+                    </div>
+                  ) : null}
 
                   <div className="settings-toggle-row">
                     <span>Автоплатеж</span>
@@ -362,4 +397,8 @@ function formatPlanLabel(planCode?: string | null): string {
   };
   if (!planCode) return 'Подписка не активна';
   return mapping[planCode] || planCode;
+}
+
+function isPlanCode(value: string): value is PlanCode {
+  return value === '1_month' || value === '6_months' || value === '12_months';
 }

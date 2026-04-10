@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 
 import httpx
 
-PLAN_PRICES: dict[str, tuple[str, int]] = {
-    '1_month': ('990.00', 1),
-    '6_months': ('4990.00', 6),
-    '12_months': ('8990.00', 12),
+PLANS: dict[str, dict[str, str | int]] = {
+    '1_month': {'amount': '399.00', 'months': 1},
+    '6_months': {'amount': '2150.00', 'months': 6},
+    '12_months': {'amount': '3799.00', 'months': 12},
 }
 
 
@@ -27,16 +27,22 @@ class YooKassaService:
         self.api_url = 'https://api.yookassa.ru/v3/payments'
 
     def plan_price(self, plan_code: str) -> str:
-        plan = PLAN_PRICES.get(plan_code)
+        plan = PLANS.get(plan_code)
         if plan is None:
             raise YooKassaServiceError('Unsupported plan_code.')
-        return plan[0]
+        amount = plan.get('amount')
+        if not isinstance(amount, str):
+            raise YooKassaServiceError('Invalid plan amount configuration.')
+        return amount
 
     def plan_months(self, plan_code: str) -> int:
-        plan = PLAN_PRICES.get(plan_code)
+        plan = PLANS.get(plan_code)
         if plan is None:
             raise YooKassaServiceError('Unsupported plan_code.')
-        return plan[1]
+        months = plan.get('months')
+        if not isinstance(months, int):
+            raise YooKassaServiceError('Invalid plan months configuration.')
+        return months
 
     async def create_payment(self, *, plan_code: str, hh_id: str) -> dict[str, str]:
         if not self.shop_id or not self.secret_key:

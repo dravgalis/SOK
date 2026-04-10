@@ -17,6 +17,6 @@ export const APP_ENDPOINTS = {
 export const APP_ROUTES = {
   login: '/',
   app: '/app',
-  paymentReturn: '/payment-return',
+  paymentReturn: '/app/payment-return',
   vacancyDetails: '/app/vacancies/:vacancyId',
 } as const;

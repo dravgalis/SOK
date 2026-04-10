@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from math import ceil
 from calendar import monthrange
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -22,7 +23,7 @@ ALLOWED_STATUSES = {'active', 'inactive', 'past_due', 'canceled'}
 
 
 class CreatePaymentRequest(BaseModel):
-    plan_code: str
+    plan_code: Literal['1_month', '6_months', '12_months']
 
 
 class AutoRenewRequest(BaseModel):
