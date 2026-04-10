@@ -11,6 +11,7 @@ from ..core.admin_store import (
     get_all_users,
     get_cached_user_vacancies,
     get_cached_vacancy_responses,
+    get_billing_operations,
     get_user_access_token,
     get_users_with_tokens,
     replace_user_vacancies,
@@ -133,6 +134,15 @@ async def admin_user_vacancies(
     refreshed_at = datetime.now(timezone.utc).isoformat()
     replace_user_vacancies(hh_id, vacancies, refreshed_at)
     return {'hh_id': hh_id, 'vacancies': vacancies, 'cached_at': refreshed_at, 'source': 'hh'}
+
+
+@router.get('/users/{hh_id}/billing-operations')
+async def admin_user_billing_operations(
+    hh_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'hh_id': hh_id, 'operations': get_billing_operations(hh_id)}
 
 
 @router.get('/users/{hh_id}/vacancies/{vacancy_id}/responses')
