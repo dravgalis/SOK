@@ -9,6 +9,9 @@ type AdminUser = {
   company_name: string | null;
   subscription_status: string | null;
   subscription_expires_at: string | null;
+  plan_code?: string | null;
+  current_period_end?: string | null;
+  billing_status?: string | null;
   selected_interface: string | null;
   created_at: string;
   last_login: string;
@@ -35,6 +38,7 @@ export function AdminDashboardPage() {
     {}
   );
   const [savingByUser, setSavingByUser] = useState<Record<string, boolean>>({});
+  const [refreshing, setRefreshing] = useState(false);
 
   const toDateInputValue = (value: string | null): string => {
     if (!value) return '';
@@ -43,53 +47,68 @@ export function AdminDashboardPage() {
     return date.toISOString().slice(0, 10);
   };
 
-  useEffect(() => {
+  const loadUsers = async (options?: { silent?: boolean }) => {
     const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
-
     if (!token) {
       navigate(ADMIN_ROUTES.login, { replace: true });
       return;
     }
+    if (!options?.silent) {
+      setRefreshing(true);
+    }
+    try {
+      setError('');
+      const response = await fetch(ADMIN_API.users, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+      });
 
-    const loadUsers = async () => {
-      try {
-        setError('');
-        const response = await fetch(ADMIN_API.users, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          credentials: 'include',
-        });
-
-        if (response.status === 401) {
-          window.localStorage.removeItem(ADMIN_STORAGE_KEY);
-          navigate(ADMIN_ROUTES.login, { replace: true });
-          return;
-        }
-
-        if (!response.ok) {
-          throw new Error('Failed to load HH users data.');
-        }
-
-        const payload = (await response.json()) as AdminUser[];
-        setUsers(payload);
-        setSubscriptionDrafts(
-          payload.reduce<Record<string, { periodType: string; periodEndsOn: string }>>((acc, user) => {
-            acc[user.hh_id] = {
-              periodType: user.subscription_status ?? 'trial_3d',
-              periodEndsOn: toDateInputValue(user.subscription_expires_at),
-            };
-            return acc;
-          }, {})
-        );
-      } catch (loadError) {
-        setError(loadError instanceof Error ? loadError.message : 'Failed to load HH users data.');
+      if (response.status === 401) {
+        window.localStorage.removeItem(ADMIN_STORAGE_KEY);
+        navigate(ADMIN_ROUTES.login, { replace: true });
+        return;
       }
-    };
 
+      if (!response.ok) {
+        throw new Error('Не удалось загрузить пользователей.');
+      }
+
+      const payload = (await response.json()) as AdminUser[];
+      setUsers(payload);
+      setSubscriptionDrafts(
+        payload.reduce<Record<string, { periodType: string; periodEndsOn: string }>>((acc, user) => {
+          acc[user.hh_id] = {
+            periodType: user.subscription_status ?? 'trial_3d',
+            periodEndsOn: toDateInputValue(user.subscription_expires_at),
+          };
+          return acc;
+        }, {})
+      );
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить пользователей.');
+    } finally {
+      if (!options?.silent) {
+        setRefreshing(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
+    if (!token) {
+      navigate(ADMIN_ROUTES.login, { replace: true });
+      return;
+    }
     void loadUsers();
+    const intervalId = window.setInterval(() => {
+      void loadUsers({ silent: true });
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
   }, [navigate]);
 
   const updateDraft = (hhId: string, patch: Partial<{ periodType: string; periodEndsOn: string }>) => {
@@ -162,22 +181,28 @@ export function AdminDashboardPage() {
   return (
     <main className="page">
       <section className="card">
-        <h1>Admin Dashboard</h1>
+        <h1>Панель администратора</h1>
 
         {error ? <p className="error">{error}</p> : null}
 
-        <p>Users who logged in via HH: {users.length}</p>
+        <div className="tableHeaderRow">
+          <p>Пользователи, вошедшие через HH: {users.length}</p>
+          <button type="button" onClick={() => void loadUsers()} disabled={refreshing}>
+            {refreshing ? 'Обновляю...' : 'Обновить'}
+          </button>
+        </div>
         <div className="tableWrapper">
           <table>
             <thead>
               <tr>
-                <th>Company</th>
-                <th>User</th>
-                <th>Last login</th>
-                <th>Period type</th>
-                <th>Period ends</th>
-                <th>Selected interface</th>
-                <th>Account</th>
+                <th>Компания</th>
+                <th>Пользователь</th>
+                <th>Последний вход</th>
+                <th>Тип подписки</th>
+                <th>Окончание подписки</th>
+                <th>Биллинг</th>
+                <th>Интерфейс</th>
+                <th>Аккаунт</th>
               </tr>
             </thead>
             <tbody>
@@ -210,14 +235,21 @@ export function AdminDashboardPage() {
                       Текущая дата: {user.subscription_expires_at ? new Date(user.subscription_expires_at).toLocaleDateString() : '—'}
                     </div>
                   </td>
+                  <td>
+                    <div className="tableMetaText">План: {user.plan_code ?? '—'}</div>
+                    <div className="tableMetaText">
+                      Период: {user.current_period_end ? new Date(user.current_period_end).toLocaleDateString() : '—'}
+                    </div>
+                    <div className="tableMetaText">Статус: {user.billing_status ?? '—'}</div>
+                  </td>
                   <td>{user.selected_interface ?? '—'}</td>
                   <td>
                     <div className="tableActions">
                       <button type="button" onClick={() => handleSaveSubscription(user.hh_id)} disabled={savingByUser[user.hh_id]}>
-                        {savingByUser[user.hh_id] ? 'Saving...' : 'Save period'}
+                        {savingByUser[user.hh_id] ? 'Сохраняю...' : 'Сохранить'}
                       </button>
                       <button type="button" onClick={() => navigate(ADMIN_ROUTES.userDetails(user.hh_id))}>
-                        Open
+                        Открыть
                       </button>
                     </div>
                   </td>

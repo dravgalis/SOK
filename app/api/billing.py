@@ -1,0 +1,227 @@
+from datetime import datetime, timezone
+from math import ceil
+from calendar import monthrange
+from typing import Literal
+
+import httpx
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+
+from ..core.admin_store import (
+    get_payment,
+    get_user_billing,
+    mark_payment_processed,
+    record_payment,
+    update_user_billing,
+    get_users_for_recurring,
+)
+from ..services.yookassa_service import YooKassaService, YooKassaServiceError
+
+router = APIRouter(prefix='/api/billing', tags=['billing'])
+
+ALLOWED_STATUSES = {'active', 'inactive', 'past_due', 'canceled'}
+
+
+class CreatePaymentRequest(BaseModel):
+    plan_code: Literal['1_month', '6_months', '12_months']
+
+
+class AutoRenewRequest(BaseModel):
+    enabled: bool
+
+
+@router.post('/create-payment')
+async def create_payment(payload: CreatePaymentRequest, request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    service = YooKassaService()
+    try:
+        payment = await service.create_payment(plan_code=payload.plan_code, hh_id=hh_id)
+    except YooKassaServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    record_payment(
+        payment_id=payment['payment_id'],
+        hh_id=hh_id,
+        plan_code=payload.plan_code,
+        amount=payment['amount'],
+        currency=payment['currency'],
+    )
+    return {'confirmation_url': payment['confirmation_url']}
+
+
+@router.post('/yookassa/webhook')
+async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
+    event = payload.get('event')
+    if event != 'payment.succeeded':
+        return {'ok': True}
+
+    obj = payload.get('object')
+    if not isinstance(obj, dict):
+        raise HTTPException(status_code=400, detail='Invalid webhook payload.')
+
+    payment_id = obj.get('id')
+    if not isinstance(payment_id, str):
+        raise HTTPException(status_code=400, detail='Missing payment id.')
+    print('WEBHOOK RECEIVED', payment_id)
+
+    payment_row = get_payment(payment_id)
+    if payment_row is None:
+        metadata = obj.get('metadata') if isinstance(obj.get('metadata'), dict) else {}
+        hh_id = str(metadata.get('hh_id', '')).strip()
+        plan_code = str(metadata.get('plan_code', '')).strip()
+        amount = obj.get('amount') if isinstance(obj.get('amount'), dict) else {}
+        amount_value = str(amount.get('value', '')).strip()
+        amount_currency = str(amount.get('currency', 'RUB')).strip()
+        if not hh_id or not plan_code or not amount_value:
+            raise HTTPException(status_code=400, detail='Unable to resolve payment metadata.')
+        record_payment(
+            payment_id=payment_id,
+            hh_id=hh_id,
+            plan_code=plan_code,
+            amount=amount_value,
+            currency=amount_currency,
+            status='pending',
+        )
+        payment_row = get_payment(payment_id)
+        if payment_row is None:
+            raise HTTPException(status_code=500, detail='Payment row was not created.')
+
+    already_processed = payment_row['status'] == 'succeeded'
+    if not already_processed:
+        already_processed = not mark_payment_processed(payment_id, 'succeeded')
+
+    hh_id = payment_row['hh_id']
+    plan_code = payment_row['plan_code']
+    current = get_user_billing(hh_id) or {}
+    now = datetime.now(timezone.utc)
+    duration = _months_for_plan(plan_code)
+    current_end = _parse_iso(current.get('current_period_end') if isinstance(current, dict) else None)
+    payment_method = obj.get('payment_method') if isinstance(obj.get('payment_method'), dict) else {}
+    payment_method_id: str | None = None
+    if payment_method and payment_method.get('saved'):
+        method_id_raw = payment_method.get('id')
+        if isinstance(method_id_raw, str) and method_id_raw:
+            payment_method_id = method_id_raw
+
+    if current_end and now < current_end:
+        extended_end = _add_calendar_months(current_end, duration)
+    else:
+        extended_end = _add_calendar_months(now, duration)
+
+    next_period_end = current_end.isoformat() if (already_processed and current_end) else extended_end.isoformat()
+
+    update_user_billing(
+        hh_id=hh_id,
+        plan_code=plan_code,
+        amount=payment_row['amount'],
+        currency=payment_row['currency'],
+        status='active',
+        current_period_end=next_period_end,
+        payment_method_id=payment_method_id if payment_method_id else current.get('payment_method_id'),
+        last_payment_id=payment_id,
+        last_payment_at=now.isoformat(),
+    )
+    return {'ok': True}
+
+
+@router.get('/me')
+async def my_billing(request: Request) -> dict[str, object]:
+    hh_id = await _require_hh_id(request)
+    billing = get_user_billing(hh_id)
+    if billing is None:
+        raise HTTPException(status_code=404, detail='User not found.')
+
+    now = datetime.now(timezone.utc)
+    current_period_end = _parse_iso(billing.get('current_period_end') if isinstance(billing, dict) else None)
+    days_left = 0
+    if current_period_end:
+        delta_seconds = (current_period_end - now).total_seconds()
+        days_left = max(0, ceil(delta_seconds / 86400))
+
+    status = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    return {
+        'plan_code': billing.get('plan_code'),
+        'current_period_end': current_period_end.isoformat() if current_period_end else None,
+        'days_left': days_left,
+        'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
+        'status': status if status in ALLOWED_STATUSES else 'inactive',
+    }
+
+
+@router.patch('/auto-renew')
+async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
+    hh_id = await _require_hh_id(request)
+    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=payload.enabled, sync_legacy_subscription=False)
+    if not updated:
+        raise HTTPException(status_code=404, detail='User not found.')
+    return {'auto_renew_enabled': payload.enabled}
+
+
+async def process_recurring_payments() -> None:
+    now = datetime.now(timezone.utc)
+    users = get_users_for_recurring(now.isoformat())
+    service = YooKassaService()
+    for user in users:
+        hh_id = str(user.get('hh_id', '')).strip()
+        plan_code = str(user.get('plan_code', '')).strip()
+        payment_method_id = str(user.get('payment_method_id', '')).strip()
+        if not hh_id or not plan_code or not payment_method_id:
+            continue
+        try:
+            payment = await service.create_recurring_payment(
+                plan_code=plan_code,
+                hh_id=hh_id,
+                payment_method_id=payment_method_id,
+            )
+            record_payment(
+                payment_id=payment['payment_id'],
+                hh_id=hh_id,
+                plan_code=plan_code,
+                amount=payment['amount'],
+                currency=payment['currency'],
+            )
+        except YooKassaServiceError:
+            update_user_billing(hh_id=hh_id, status='past_due', sync_legacy_subscription=False)
+
+
+async def _require_hh_id(request: Request) -> str:
+    access_token = request.cookies.get('access_token')
+    if not access_token:
+        raise HTTPException(status_code=401, detail='Unauthorized.')
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get('https://api.hh.ru/me', headers={'Authorization': f'Bearer {access_token}'})
+    if response.status_code >= 400:
+        raise HTTPException(status_code=401, detail='Invalid access token.')
+    payload = response.json()
+    hh_id = str(payload.get('id', '')).strip()
+    if not hh_id:
+        raise HTTPException(status_code=401, detail='Unable to resolve user id.')
+    return hh_id
+
+
+def _parse_iso(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _months_for_plan(plan_code: str) -> int:
+    mapping = {'1_month': 1, '6_months': 6, '12_months': 12}
+    months = mapping.get(plan_code)
+    if months is None:
+        raise HTTPException(status_code=400, detail='Unsupported plan_code.')
+    return months
+
+
+def _add_calendar_months(start: datetime, months: int) -> datetime:
+    year = start.year + ((start.month - 1 + months) // 12)
+    month = ((start.month - 1 + months) % 12) + 1
+    day = min(start.day, monthrange(year, month)[1])
+    return start.replace(year=year, month=month, day=day)
