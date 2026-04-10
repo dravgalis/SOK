@@ -8,8 +8,10 @@ export function readTheme(): ThemeKey {
   return 'default';
 }
 
-export function applyTheme(theme: ThemeKey): void {
-  window.localStorage.setItem('app_theme', theme);
+export function applyTheme(theme: ThemeKey, persist = true): void {
+  if (persist) {
+    window.localStorage.setItem('app_theme', theme);
+  }
   document.body.classList.remove('theme-default', 'theme-dark', 'theme-blue', 'theme-beige', 'theme-mint');
   document.body.classList.add(`theme-${theme}`);
 }

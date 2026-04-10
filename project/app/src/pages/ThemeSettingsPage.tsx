@@ -21,13 +21,14 @@ const PREVIEW_CLASS: Record<ThemeKey, string> = {
 
 export function ThemeSettingsPage() {
   const [theme, setTheme] = useState<ThemeKey>(() => readTheme());
+  const [previewTheme, setPreviewTheme] = useState<ThemeKey>(() => readTheme());
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+    applyTheme(previewTheme, false);
+  }, [previewTheme]);
 
   useEffect(() => {
     const loadThemes = async () => {
@@ -49,14 +50,19 @@ export function ThemeSettingsPage() {
   const handleSelectTheme = async (themeItem: ThemeItem) => {
     if (!themeItem.paid || themeItem.unlocked) {
       setTheme(themeItem.code);
+      setPreviewTheme(themeItem.code);
+      applyTheme(themeItem.code, true);
       return;
     }
+    setPreviewTheme(themeItem.code);
+  };
 
+  const handlePurchaseTheme = async (themeCode: ThemeKey) => {
     const response = await fetch(APP_ENDPOINTS.createThemePayment, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ theme_code: themeItem.code }),
+      body: JSON.stringify({ theme_code: themeCode }),
     });
     if (!response.ok) {
       setError('Не удалось создать оплату темы.');
@@ -67,6 +73,9 @@ export function ThemeSettingsPage() {
       window.location.href = payload.confirmation_url;
     }
   };
+
+  const previewThemeItem = themes.find((item) => item.code === previewTheme);
+  const previewLocked = Boolean(previewThemeItem?.paid && !previewThemeItem?.unlocked);
 
   return (
     <main className="page page-top">
@@ -88,11 +97,24 @@ export function ThemeSettingsPage() {
               <span className={`theme-swatch-preview ${PREVIEW_CLASS[themeOption.code] || PREVIEW_CLASS.default}`} />
               <span className="theme-swatch-label">{themeOption.label}</span>
               {themeOption.paid && !themeOption.unlocked ? (
-                <span className="theme-swatch-price">Премиум · {themeOption.price} ₽</span>
+                <span className="theme-swatch-price">Премиум · {themeOption.price} ₽ · Предпросмотр</span>
               ) : null}
             </button>
           ))}
         </div>
+        {previewLocked ? (
+          <div className="theme-paywall">
+            <strong>Тема в режиме предпросмотра</strong>
+            <p>После обновления страницы премиум-тема будет закрыта. Чтобы пользоваться постоянно — приобретите её.</p>
+            <button
+              type="button"
+              className="settings-secondary-button"
+              onClick={() => void handlePurchaseTheme(previewTheme)}
+            >
+              Приобрести тему за {previewThemeItem?.price ?? 50} ₽
+            </button>
+          </div>
+        ) : null}
         <div style={{ marginTop: 16 }}>
           <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
         </div>
