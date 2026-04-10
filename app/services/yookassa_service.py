@@ -20,7 +20,9 @@ class YooKassaService:
     def __init__(self) -> None:
         self.shop_id = os.getenv('YOOKASSA_SHOP_ID', '').strip()
         self.secret_key = os.getenv('YOOKASSA_SECRET_KEY', '').strip()
-        self.frontend_url = os.getenv('FRONTEND_APP_URL', 'https://sok-app.onrender.com').strip()
+        # FRONTEND_PAYMENT_URL используется только для возврата после оплаты
+        # если не задан — fallback на FRONTEND_APP_URL
+        self.frontend_payment_url = (os.getenv('FRONTEND_PAYMENT_URL') or os.getenv('FRONTEND_APP_URL')).strip()
         self.currency = os.getenv('YOOKASSA_CURRENCY', 'RUB').strip().upper()
         self.api_url = 'https://api.yookassa.ru/v3/payments'
 
@@ -46,7 +48,7 @@ class YooKassaService:
             'capture': True,
             'confirmation': {
                 'type': 'redirect',
-                'return_url': f"{self.frontend_url.rstrip('/')}/payment-return",
+                'return_url': f"{self.frontend_payment_url.rstrip('/')}/payment-return",
             },
             'description': f'SOK subscription {plan_code}',
             'save_payment_method': True,
