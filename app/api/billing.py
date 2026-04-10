@@ -62,29 +62,12 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     payment_id = obj.get('id')
     if not isinstance(payment_id, str):
         raise HTTPException(status_code=400, detail='Missing payment id.')
-    print('WEBHOOK RECEIVED', payment_id)
+    print('WEBHOOK RECEIVED:', payment_id)
 
     payment_row = get_payment(payment_id)
     if payment_row is None:
-        metadata = obj.get('metadata') if isinstance(obj.get('metadata'), dict) else {}
-        hh_id = str(metadata.get('hh_id', '')).strip()
-        plan_code = str(metadata.get('plan_code', '')).strip()
-        amount = obj.get('amount') if isinstance(obj.get('amount'), dict) else {}
-        amount_value = str(amount.get('value', '')).strip()
-        amount_currency = str(amount.get('currency', 'RUB')).strip()
-        if not hh_id or not plan_code or not amount_value:
-            raise HTTPException(status_code=400, detail='Unable to resolve payment metadata.')
-        record_payment(
-            payment_id=payment_id,
-            hh_id=hh_id,
-            plan_code=plan_code,
-            amount=amount_value,
-            currency=amount_currency,
-            status='pending',
-        )
-        payment_row = get_payment(payment_id)
-        if payment_row is None:
-            raise HTTPException(status_code=500, detail='Payment row was not created.')
+        print('WEBHOOK ERROR: payment not found in billing_payments:', payment_id)
+        return {'ok': False}
 
     already_processed = payment_row['status'] == 'succeeded'
     if not already_processed:
@@ -92,6 +75,8 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
 
     hh_id = payment_row['hh_id']
     plan_code = payment_row['plan_code']
+    print('USER:', hh_id)
+    print('PLAN:', plan_code)
     current = get_user_billing(hh_id) or {}
     now = datetime.now(timezone.utc)
     duration = _months_for_plan(plan_code)
