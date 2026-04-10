@@ -60,22 +60,34 @@ export function OperationsPage() {
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
         <h2>Операции</h2>
-        <p>
-          Всего оплат: <strong>{totalOperations}</strong> · Оплачено: <strong>{payload?.total_paid ?? 0} ₽</strong> · Осталось:{' '}
-          <strong>{payload?.days_left ?? 0} дн.</strong>
-        </p>
+        <div className="operations-summary-grid">
+          <article className="operations-summary-card">
+            <span>Всего оплат</span>
+            <strong>{totalOperations}</strong>
+          </article>
+          <article className="operations-summary-card">
+            <span>Оплачено</span>
+            <strong>{payload?.total_paid ?? 0} ₽</strong>
+          </article>
+          <article className="operations-summary-card">
+            <span>Осталось</span>
+            <strong>{payload?.days_left ?? 0} дн.</strong>
+          </article>
+        </div>
         {error ? <p className="status status-error">{error}</p> : null}
 
-        <ul className="vacancies-list">
+        <ul className="operations-list">
           {(payload?.operations || []).map((operation) => (
-            <li key={operation.payment_id} className="vacancy-item">
-              <div className={`operation-badge ${operation.status === 'succeeded' ? 'operation-success' : 'operation-failed'}`}>
-                {operation.status === 'succeeded' ? 'Успешно' : 'Ошибка'}
+            <li key={operation.payment_id} className="operations-item">
+              <div className="operations-item-head">
+                <div className={`operation-badge ${operation.status === 'succeeded' ? 'operation-success' : 'operation-failed'}`}>
+                  {operation.status === 'succeeded' ? 'Успешно' : 'Ошибка'}
+                </div>
+                <strong>
+                  {operation.amount} {operation.currency}
+                </strong>
               </div>
               <p>ID: {operation.payment_id}</p>
-              <p>
-                Сумма: {operation.amount} {operation.currency}
-              </p>
               <p>План: {operation.plan_code}</p>
               <p>Продлено на: {operation.months_extended} мес.</p>
               <p>Дата: {operation.created_at ? new Date(operation.created_at).toLocaleString() : '—'}</p>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_ENDPOINTS, APP_ROUTES } from '../config';
+import { ThemeKey, applyTheme, readTheme } from '../theme';
 
 type Me = {
   id: string;
@@ -32,7 +33,6 @@ type Vacancy = {
 };
 
 type VacancyTabKey = 'active' | 'archived';
-type ThemeKey = 'default';
 type PlanCode = '1_month' | '6_months' | '12_months';
 
 type VacanciesPayload = {
@@ -112,10 +112,7 @@ export function DashboardPage() {
   });
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [theme] = useState<ThemeKey>(() => {
-    const raw = window.localStorage.getItem('app_theme');
-    return raw === 'default' ? 'default' : 'default';
-  });
+  const [theme] = useState<ThemeKey>(() => readTheme());
   const [billing, setBilling] = useState<BillingMe | null>(null);
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
@@ -175,9 +172,7 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem('app_theme', theme);
-    document.body.classList.remove('theme-default');
-    document.body.classList.add(`theme-${theme}`);
+    applyTheme(theme);
   }, [theme]);
 
   useEffect(() => {

@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_ROUTES } from '../config';
+import { ThemeKey, applyTheme, readTheme } from '../theme';
 
-type ThemeKey = 'default';
+const THEMES: { key: ThemeKey; label: string; className: string }[] = [
+  { key: 'default', label: 'Светлая', className: 'theme-preview-default' },
+  { key: 'dark', label: 'Черная', className: 'theme-preview-dark' },
+  { key: 'blue', label: 'Синяя', className: 'theme-preview-blue' },
+  { key: 'beige', label: 'Бежевая', className: 'theme-preview-beige' },
+];
 
 export function ThemeSettingsPage() {
-  const [theme, setTheme] = useState<ThemeKey>(() => {
-    const raw = window.localStorage.getItem('app_theme');
-    return raw === 'default' ? 'default' : 'default';
-  });
+  const [theme, setTheme] = useState<ThemeKey>(() => readTheme());
 
   useEffect(() => {
-    window.localStorage.setItem('app_theme', theme);
-    document.body.classList.remove('theme-default');
-    document.body.classList.add(`theme-${theme}`);
+    applyTheme(theme);
   }, [theme]);
 
   return (
@@ -21,15 +22,21 @@ export function ThemeSettingsPage() {
       <section className="card dashboard-card">
         <h2>Выбор темы</h2>
         <p>Нажмите на вариант темы:</p>
-        <button
-          type="button"
-          className={`theme-swatch ${theme === 'default' ? 'theme-swatch-active' : ''}`}
-          onClick={() => setTheme('default')}
-          aria-label="Белая тема"
-          title="Белая тема"
-        >
-          <span className="theme-swatch-preview" />
-        </button>
+        <div className="theme-grid">
+          {THEMES.map((themeOption) => (
+            <button
+              key={themeOption.key}
+              type="button"
+              className={`theme-swatch ${theme === themeOption.key ? 'theme-swatch-active' : ''}`}
+              onClick={() => setTheme(themeOption.key)}
+              aria-label={themeOption.label}
+              title={themeOption.label}
+            >
+              <span className={`theme-swatch-preview ${themeOption.className}`} />
+              <span className="theme-swatch-label">{themeOption.label}</span>
+            </button>
+          ))}
+        </div>
         <div style={{ marginTop: 16 }}>
           <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
         </div>
