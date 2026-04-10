@@ -22,7 +22,7 @@ body {
 
 .card {
   width: 100%;
-  max-width: 980px;
+  max-width: 1220px;
   padding: 24px;
   border-radius: 12px;
   background: #ffffff;
@@ -43,12 +43,16 @@ input {
 }
 
 button {
-  padding: 8px 10px;
-  border: 1px solid #d0d5dd;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
   border-radius: 8px;
   font: inherit;
-  background: #fff;
+  background: #f8fafc;
   cursor: pointer;
+}
+
+button:hover {
+  background: #e2e8f0;
 }
 
 .form button {
@@ -63,6 +67,8 @@ button {
 .tableWrapper {
   margin-top: 16px;
   overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
 }
 
 table {
@@ -73,8 +79,9 @@ table {
 th,
 td {
   border-bottom: 1px solid #eaecf0;
-  padding: 10px 8px;
+  padding: 12px 10px;
   text-align: left;
+  vertical-align: top;
 }
 
 .tableSelect {
@@ -95,4 +102,93 @@ td {
   display: inline-flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.tableHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tableHeaderRow p {
+  margin: 0;
+}
+
+.admin-theme-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-theme-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.admin-theme-preview-default {
+  background: linear-gradient(145deg, #ffffff 0%, #f1f5f9 100%);
+}
+
+.admin-theme-preview-dark {
+  background: linear-gradient(145deg, #111827 0%, #334155 100%);
+}
+
+.admin-theme-preview-blue {
+  background: linear-gradient(145deg, #dbeafe 0%, #3b82f6 100%);
+}
+
+.admin-theme-preview-beige {
+  background: linear-gradient(145deg, #fff6e8 0%, #d6b88c 100%);
+}
+
+.admin-theme-preview-mint {
+  background: linear-gradient(145deg, #e7fff6 0%, #2f7d67 100%);
+}
+
+.admin-theme-preview-lavender {
+  background: linear-gradient(145deg, #f5efff 0%, #8b5cf6 100%);
+}
+
+.admin-theme-preview-sunset {
+  background: linear-gradient(145deg, #fff1e6 0%, #fb7185 100%);
+}
+
+.admin-theme-preview-aurora {
+  background: linear-gradient(145deg, #c7d2fe 0%, #14b8a6 100%);
+}
+
+.admin-theme-preview-neon {
+  background: linear-gradient(145deg, #020617 0%, #06b6d4 60%, #d946ef 100%);
+}
+
+.admin-theme-preview-golden-sakura {
+  background: linear-gradient(145deg, #fff8dc 0%, #f59e0b 60%, #fbcfe8 100%);
+}
+
+.admin-theme-preview-mythic-pop {
+  background: linear-gradient(145deg, #0f172a 0%, #7c3aed 45%, #ec4899 100%);
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statusChipSuccess {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.statusChipError {
+  background: #fee2e2;
+  color: #991b1b;
 }

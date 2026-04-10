@@ -41,11 +41,41 @@ def init_users_table() -> None:
                     responses_count INTEGER NOT NULL DEFAULT 0,
                     subscription_status TEXT,
                     subscription_expires_at TEXT,
+                    plan_code TEXT,
+                    billing_amount TEXT,
+                    billing_currency TEXT,
+                    billing_status TEXT,
+                    auto_renew_enabled INTEGER NOT NULL DEFAULT 0,
+                    current_period_end TEXT,
+                    payment_method_id TEXT,
+                    last_payment_id TEXT,
+                    last_payment_at TEXT,
+                    unlocked_themes TEXT,
                     selected_interface TEXT,
                     access_token TEXT,
                     metrics_updated_at TEXT,
                     created_at TEXT NOT NULL,
                     last_login TEXT NOT NULL
+                )
+                '''
+            )
+        )
+        connection.execute(
+            text(
+                '''
+                CREATE TABLE IF NOT EXISTS billing_payments (
+                    payment_id TEXT PRIMARY KEY,
+                    hh_id TEXT NOT NULL,
+                    plan_code TEXT NOT NULL,
+                    amount TEXT NOT NULL,
+                    currency TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    provider_status TEXT,
+                    failure_reason TEXT,
+                    product_type TEXT NOT NULL DEFAULT 'subscription',
+                    theme_code TEXT,
+                    created_at TEXT NOT NULL,
+                    processed_at TEXT
                 )
                 '''
             )
@@ -88,9 +118,23 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'subscription_status', 'TEXT')
         _ensure_column(connection, 'users', 'subscription_expires_at', 'TEXT')
+        _ensure_column(connection, 'users', 'plan_code', 'TEXT')
+        _ensure_column(connection, 'users', 'billing_amount', 'TEXT')
+        _ensure_column(connection, 'users', 'billing_currency', 'TEXT')
+        _ensure_column(connection, 'users', 'billing_status', 'TEXT')
+        _ensure_column(connection, 'users', 'auto_renew_enabled', 'INTEGER NOT NULL DEFAULT 0')
+        _ensure_column(connection, 'users', 'current_period_end', 'TEXT')
+        _ensure_column(connection, 'users', 'payment_method_id', 'TEXT')
+        _ensure_column(connection, 'users', 'last_payment_id', 'TEXT')
+        _ensure_column(connection, 'users', 'last_payment_at', 'TEXT')
+        _ensure_column(connection, 'users', 'unlocked_themes', 'TEXT')
         _ensure_column(connection, 'users', 'selected_interface', 'TEXT')
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'provider_status', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'product_type', "TEXT NOT NULL DEFAULT 'subscription'")
+        _ensure_column(connection, 'billing_payments', 'theme_code', 'TEXT')
 
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
@@ -172,7 +216,7 @@ def get_all_users() -> list[dict[str, str | int | None]]:
                 '''
                 SELECT
                     hh_id, name, email, company_name, vacancies_count, responses_count,
-                    subscription_status, subscription_expires_at, selected_interface,
+                    subscription_status, subscription_expires_at, plan_code, current_period_end, billing_status, selected_interface,
                     created_at, last_login
                 FROM users
                 ORDER BY last_login DESC
@@ -220,6 +264,15 @@ def get_user_access_token(hh_id: str) -> str | None:
     return token if isinstance(token, str) and token else None
 
 
+def get_user_selected_interface(hh_id: str) -> str | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(text('SELECT selected_interface FROM users WHERE hh_id = :hh_id'), {'hh_id': hh_id}).first()
+    if row is None:
+        return None
+    value = row[0]
+    return value if isinstance(value, str) and value else None
+
+
 def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     with ENGINE.connect() as connection:
         row = connection.execute(
@@ -235,6 +288,281 @@ def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     status_value = status_raw if isinstance(status_raw, str) and status_raw else None
     expires_value = expires_raw if isinstance(expires_raw, str) and expires_raw else None
     return status_value, expires_value
+
+
+def get_user_billing(hh_id: str) -> dict[str, str | bool | None] | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text(
+                '''
+                SELECT
+                    plan_code,
+                    billing_amount,
+                    billing_currency,
+                    billing_status,
+                    auto_renew_enabled,
+                    current_period_end,
+                    payment_method_id,
+                    last_payment_id,
+                    last_payment_at
+                FROM users
+                WHERE hh_id = :hh_id
+                '''
+            ),
+            {'hh_id': hh_id},
+        ).first()
+
+    if row is None:
+        return None
+
+    return {
+        'plan_code': row[0] if isinstance(row[0], str) and row[0] else None,
+        'amount': row[1] if isinstance(row[1], str) and row[1] else None,
+        'currency': row[2] if isinstance(row[2], str) and row[2] else None,
+        'status': row[3] if isinstance(row[3], str) and row[3] else 'inactive',
+        'auto_renew_enabled': bool(row[4]),
+        'current_period_end': row[5] if isinstance(row[5], str) and row[5] else None,
+        'payment_method_id': row[6] if isinstance(row[6], str) and row[6] else None,
+        'last_payment_id': row[7] if isinstance(row[7], str) and row[7] else None,
+        'last_payment_at': row[8] if isinstance(row[8], str) and row[8] else None,
+    }
+
+
+def update_user_billing(
+    *,
+    hh_id: str,
+    plan_code: str | None = None,
+    amount: str | None = None,
+    currency: str | None = None,
+    status: str | None = None,
+    auto_renew_enabled: bool | None = None,
+    current_period_end: str | None = None,
+    payment_method_id: str | None = None,
+    last_payment_id: str | None = None,
+    last_payment_at: str | None = None,
+    sync_legacy_subscription: bool = True,
+) -> bool:
+    set_parts: list[str] = []
+    params: dict[str, object] = {'hh_id': hh_id}
+
+    if plan_code is not None:
+        set_parts.append('plan_code = :plan_code')
+        params['plan_code'] = plan_code
+    if amount is not None:
+        set_parts.append('billing_amount = :billing_amount')
+        params['billing_amount'] = amount
+    if currency is not None:
+        set_parts.append('billing_currency = :billing_currency')
+        params['billing_currency'] = currency
+    if status is not None:
+        set_parts.append('billing_status = :billing_status')
+        params['billing_status'] = status
+    if auto_renew_enabled is not None:
+        set_parts.append('auto_renew_enabled = :auto_renew_enabled')
+        params['auto_renew_enabled'] = 1 if auto_renew_enabled else 0
+    if current_period_end is not None:
+        set_parts.append('current_period_end = :current_period_end')
+        params['current_period_end'] = current_period_end
+    if payment_method_id is not None:
+        set_parts.append('payment_method_id = :payment_method_id')
+        params['payment_method_id'] = payment_method_id
+    if last_payment_id is not None:
+        set_parts.append('last_payment_id = :last_payment_id')
+        params['last_payment_id'] = last_payment_id
+    if last_payment_at is not None:
+        set_parts.append('last_payment_at = :last_payment_at')
+        params['last_payment_at'] = last_payment_at
+
+    if sync_legacy_subscription and current_period_end is not None:
+        set_parts.append('subscription_expires_at = :subscription_expires_at')
+        params['subscription_expires_at'] = current_period_end
+    if sync_legacy_subscription and plan_code is not None:
+        legacy_map = {'1_month': 'paid_1m', '6_months': 'paid_6m', '12_months': 'paid_1y'}
+        set_parts.append('subscription_status = :subscription_status')
+        params['subscription_status'] = legacy_map.get(plan_code)
+
+    if not set_parts:
+        return False
+
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(f"UPDATE users SET {', '.join(set_parts)} WHERE hh_id = :hh_id"),
+            params,
+        )
+        return result.rowcount > 0
+
+
+def record_payment(
+    *,
+    payment_id: str,
+    hh_id: str,
+    plan_code: str,
+    amount: str,
+    currency: str,
+    status: str = 'pending',
+    provider_status: str | None = None,
+    product_type: str = 'subscription',
+    theme_code: str | None = None,
+) -> None:
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text(
+                '''
+                INSERT INTO billing_payments (
+                    payment_id, hh_id, plan_code, amount, currency, status, provider_status, product_type, theme_code, created_at
+                )
+                VALUES (
+                    :payment_id, :hh_id, :plan_code, :amount, :currency, :status, :provider_status, :product_type, :theme_code, :created_at
+                )
+                ON CONFLICT(payment_id) DO NOTHING
+                '''
+            ),
+            {
+                'payment_id': payment_id,
+                'hh_id': hh_id,
+                'plan_code': plan_code,
+                'amount': amount,
+                'currency': currency,
+                'status': status,
+                'provider_status': provider_status,
+                'product_type': product_type,
+                'theme_code': theme_code,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+
+def get_payment(payment_id: str) -> dict[str, str] | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text(
+                '''
+                SELECT
+                    payment_id, hh_id, plan_code, amount, currency, status, provider_status, failure_reason,
+                    product_type, theme_code, created_at, processed_at
+                FROM billing_payments
+                WHERE payment_id = :payment_id
+                '''
+            ),
+            {'payment_id': payment_id},
+        ).first()
+    if row is None:
+        return None
+    return {
+        'payment_id': str(row[0]),
+        'hh_id': str(row[1]),
+        'plan_code': str(row[2]),
+        'amount': str(row[3]),
+        'currency': str(row[4]),
+        'status': str(row[5]),
+        'provider_status': str(row[6]) if row[6] is not None else '',
+        'failure_reason': str(row[7]) if row[7] is not None else '',
+        'product_type': str(row[8]) if row[8] is not None else 'subscription',
+        'theme_code': str(row[9]) if row[9] is not None else '',
+        'created_at': str(row[10]) if row[10] is not None else '',
+        'processed_at': str(row[11]) if row[11] is not None else '',
+    }
+
+
+def mark_payment_processed(payment_id: str, status: str) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE billing_payments
+                SET status = :status, processed_at = :processed_at
+                WHERE payment_id = :payment_id AND status != 'succeeded'
+                '''
+            ),
+            {'payment_id': payment_id, 'status': status, 'processed_at': datetime.now(timezone.utc).isoformat()},
+        )
+        return result.rowcount > 0
+
+
+def mark_payment_failed(payment_id: str, *, reason: str | None, provider_status: str | None) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE billing_payments
+                SET status = 'failed',
+                    failure_reason = :failure_reason,
+                    provider_status = :provider_status,
+                    processed_at = :processed_at
+                WHERE payment_id = :payment_id
+                '''
+            ),
+            {
+                'payment_id': payment_id,
+                'failure_reason': reason,
+                'provider_status': provider_status,
+                'processed_at': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return result.rowcount > 0
+
+
+def get_billing_operations(hh_id: str) -> list[dict[str, str]]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT payment_id, plan_code, amount, currency, status, provider_status, failure_reason, product_type, theme_code, created_at, processed_at
+                FROM billing_payments
+                WHERE hh_id = :hh_id
+                ORDER BY created_at DESC
+                '''
+            ),
+            {'hh_id': hh_id},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def get_user_unlocked_themes(hh_id: str) -> set[str]:
+    with ENGINE.connect() as connection:
+        row = connection.execute(text('SELECT unlocked_themes FROM users WHERE hh_id = :hh_id'), {'hh_id': hh_id}).first()
+    if row is None or not isinstance(row[0], str) or not row[0]:
+        return set()
+    return {item.strip() for item in row[0].split(',') if item.strip()}
+
+
+def unlock_theme_for_user(hh_id: str, theme_code: str) -> bool:
+    themes = get_user_unlocked_themes(hh_id)
+    themes.add(theme_code)
+    themes_raw = ','.join(sorted(themes))
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text('UPDATE users SET unlocked_themes = :themes WHERE hh_id = :hh_id'),
+            {'themes': themes_raw, 'hh_id': hh_id},
+        )
+        return result.rowcount > 0
+
+
+def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text('UPDATE users SET selected_interface = :selected_interface WHERE hh_id = :hh_id'),
+            {'selected_interface': selected_interface, 'hh_id': hh_id},
+        )
+        return result.rowcount > 0
+
+
+def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT hh_id, plan_code, billing_amount, billing_currency, payment_method_id, current_period_end
+                FROM users
+                WHERE auto_renew_enabled = 1
+                  AND payment_method_id IS NOT NULL
+                  AND current_period_end IS NOT NULL
+                  AND current_period_end <= :now_iso
+                '''
+            ),
+            {'now_iso': now_iso},
+        ).mappings()
+        return [dict(row) for row in rows]
 
 
 def update_user_subscription(*, hh_id: str, subscription_status: str | None, subscription_expires_at: str | None) -> bool:

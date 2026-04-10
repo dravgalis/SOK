@@ -2,6 +2,7 @@ export const ADMIN_API = {
   login: 'https://sok-i9cq.onrender.com/admin/login',
   users: 'https://sok-i9cq.onrender.com/admin/users',
   userSubscription: (hhId: string) => `https://sok-i9cq.onrender.com/admin/users/${hhId}/subscription`,
+  billingOperations: (hhId: string) => `https://sok-i9cq.onrender.com/admin/users/${hhId}/billing-operations`,
   userVacancies: (hhId: string, force = false) =>
     `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies${force ? '?force=true' : ''}`,
   vacancyResponses: (hhId: string, vacancyId: string, force = false) =>
@@ -12,6 +13,7 @@ export const ADMIN_ROUTES = {
   login: '/admin/login',
   dashboard: '/admin/dashboard',
   userDetails: (hhId: string) => `/admin/users/${hhId}`,
+  userOperations: (hhId: string) => `/admin/users/${hhId}/operations`,
   vacancyResponses: (hhId: string, vacancyId: string) => `/admin/users/${hhId}/vacancies/${vacancyId}/responses`,
 } as const;
 
