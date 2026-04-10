@@ -9,6 +9,7 @@ type ThemeItem = {
   price: number;
   paid: boolean;
   unlocked: boolean;
+  rarity: string;
 };
 
 const PREVIEW_CLASS: Record<ThemeKey, string> = {
@@ -17,10 +18,15 @@ const PREVIEW_CLASS: Record<ThemeKey, string> = {
   blue: 'theme-preview-blue',
   beige: 'theme-preview-beige',
   mint: 'theme-preview-mint',
+  lavender: 'theme-preview-lavender',
+  sunset: 'theme-preview-sunset',
+  aurora: 'theme-preview-aurora',
+  neon: 'theme-preview-neon',
+  'golden-sakura': 'theme-preview-golden-sakura',
+  'mythic-pop': 'theme-preview-mythic-pop',
 };
 
 export function ThemeSettingsPage() {
-  const [theme, setTheme] = useState<ThemeKey>(() => readTheme());
   const [previewTheme, setPreviewTheme] = useState<ThemeKey>(() => readTheme());
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,11 +53,23 @@ export function ThemeSettingsPage() {
     void loadThemes();
   }, []);
 
+  const saveSelectedTheme = async (selectedTheme: ThemeKey) => {
+    const response = await fetch(APP_ENDPOINTS.selectedTheme, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme_code: selectedTheme }),
+    });
+    if (!response.ok) {
+      setError('Не удалось сохранить выбранную тему.');
+    }
+  };
+
   const handleSelectTheme = async (themeItem: ThemeItem) => {
     if (!themeItem.paid || themeItem.unlocked) {
-      setTheme(themeItem.code);
       setPreviewTheme(themeItem.code);
       applyTheme(themeItem.code, true);
+      void saveSelectedTheme(themeItem.code);
       return;
     }
     setPreviewTheme(themeItem.code);
@@ -89,16 +107,17 @@ export function ThemeSettingsPage() {
             <button
               key={themeOption.code}
               type="button"
-              className={`theme-swatch ${theme === themeOption.code ? 'theme-swatch-active' : ''}`}
+              className={`theme-swatch ${previewTheme === themeOption.code ? 'theme-swatch-active' : ''}`}
               onClick={() => void handleSelectTheme(themeOption)}
               aria-label={themeOption.label}
               title={themeOption.label}
             >
               <span className={`theme-swatch-preview ${PREVIEW_CLASS[themeOption.code] || PREVIEW_CLASS.default}`} />
               <span className="theme-swatch-label">{themeOption.label}</span>
-              {themeOption.paid && !themeOption.unlocked ? (
-                <span className="theme-swatch-price">Премиум · {themeOption.price} ₽ · Предпросмотр</span>
-              ) : null}
+              <span className="theme-swatch-price">
+                {themeOption.rarity} {themeOption.paid ? `· ${themeOption.price} ₽` : '· бесплатно'}
+                {themeOption.paid && !themeOption.unlocked ? ' · Предпросмотр' : ''}
+              </span>
             </button>
           ))}
         </div>

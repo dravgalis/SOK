@@ -17,6 +17,20 @@ type AdminUser = {
   last_login: string;
 };
 
+const THEME_SWATCH_CLASS: Record<string, string> = {
+  default: 'admin-theme-preview-default',
+  dark: 'admin-theme-preview-dark',
+  blue: 'admin-theme-preview-blue',
+  beige: 'admin-theme-preview-beige',
+  mint: 'admin-theme-preview-mint',
+  lavender: 'admin-theme-preview-lavender',
+  sunset: 'admin-theme-preview-sunset',
+  aurora: 'admin-theme-preview-aurora',
+  neon: 'admin-theme-preview-neon',
+  'golden-sakura': 'admin-theme-preview-golden-sakura',
+  'mythic-pop': 'admin-theme-preview-mythic-pop',
+};
+
 function getAdminPeriodLabel(status: string | null): string {
   if (!status) return '—';
 
@@ -242,7 +256,19 @@ export function AdminDashboardPage() {
                     </div>
                     <div className="tableMetaText">Статус: {user.billing_status ?? '—'}</div>
                   </td>
-                  <td>{user.selected_interface ?? '—'}</td>
+                  <td>
+                    {user.selected_interface ? (
+                      <span className="admin-theme-cell" title={user.selected_interface}>
+                        <span
+                          className={`admin-theme-swatch ${THEME_SWATCH_CLASS[user.selected_interface] ?? 'admin-theme-preview-default'}`}
+                          aria-hidden="true"
+                        />
+                        <span>{user.selected_interface}</span>
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                   <td>
                     <div className="tableActions">
                       <button type="button" onClick={() => handleSaveSubscription(user.hh_id)} disabled={savingByUser[user.hh_id]}>

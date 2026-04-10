@@ -16,6 +16,7 @@ from ..core.admin_store import (
     mark_payment_processed,
     record_payment,
     unlock_theme_for_user,
+    update_user_selected_interface,
     update_user_billing,
     get_users_for_recurring,
 )
@@ -35,15 +36,25 @@ class AutoRenewRequest(BaseModel):
 
 
 class CreateThemePaymentRequest(BaseModel):
-    theme_code: Literal['mint']
+    theme_code: str
+
+
+class SelectThemeRequest(BaseModel):
+    theme_code: str
 
 
 THEME_STORE: dict[str, dict[str, object]] = {
-    'default': {'label': 'Светлая', 'price': 0.0, 'paid': False},
-    'dark': {'label': 'Темно-синяя', 'price': 0.0, 'paid': False},
-    'blue': {'label': 'Синяя', 'price': 0.0, 'paid': False},
-    'beige': {'label': 'Бежевая', 'price': 0.0, 'paid': False},
-    'mint': {'label': 'Зелёная премиум', 'price': 50.0, 'paid': True},
+    'default': {'label': 'Светлая', 'price': 0.0, 'paid': False, 'rarity': 'Обычная'},
+    'dark': {'label': 'Тёмно-синяя', 'price': 0.0, 'paid': False, 'rarity': 'Обычная'},
+    'blue': {'label': 'Голубая', 'price': 0.0, 'paid': False, 'rarity': 'Обычная'},
+    'beige': {'label': 'Бежевая', 'price': 0.0, 'paid': False, 'rarity': 'Обычная'},
+    'mint': {'label': 'Мятная', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
+    'lavender': {'label': 'Лавандовая', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
+    'sunset': {'label': 'Закат', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
+    'aurora': {'label': 'Северное сияние', 'price': 150.0, 'paid': True, 'rarity': 'Редкая'},
+    'neon': {'label': 'Неон', 'price': 750.0, 'paid': True, 'rarity': 'Эпическая'},
+    'golden-sakura': {'label': 'Золотая сакура', 'price': 1500.0, 'paid': True, 'rarity': 'Легендарная'},
+    'mythic-pop': {'label': 'Mythic Pop', 'price': 3000.0, 'paid': True, 'rarity': 'Мифическая'},
 }
 
 
@@ -216,10 +227,28 @@ async def my_themes(request: Request) -> dict[str, object]:
                 'label': item.get('label'),
                 'price': item.get('price'),
                 'paid': is_paid,
+                'rarity': item.get('rarity', 'Обычная'),
                 'unlocked': (not is_paid) or (code in unlocked),
             }
         )
     return {'themes': themes}
+
+
+@router.patch('/selected-theme')
+async def set_selected_theme(payload: SelectThemeRequest, request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    theme_info = THEME_STORE.get(payload.theme_code)
+    if theme_info is None:
+        raise HTTPException(status_code=400, detail='Unknown theme.')
+
+    if bool(theme_info.get('paid')):
+        unlocked = get_user_unlocked_themes(hh_id)
+        if payload.theme_code not in unlocked:
+            raise HTTPException(status_code=403, detail='Theme is locked.')
+
+    if not update_user_selected_interface(hh_id, payload.theme_code):
+        raise HTTPException(status_code=404, detail='User not found.')
+    return {'selected_theme': payload.theme_code}
 
 
 @router.get('/me')

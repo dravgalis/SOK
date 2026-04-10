@@ -51,6 +51,18 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  position: relative;
+  overflow-x: hidden;
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
 }
 
 body.theme-default {
@@ -115,6 +127,86 @@ body.theme-mint {
   --border: #b8ddd0;
   --surface-neutral: #cfeadf;
   --surface-tab-count: #b4dece;
+}
+
+body.theme-lavender {
+  --bg: #f5f1ff;
+  --card: #fcfaff;
+  --text: #2f1f56;
+  --muted: #6d5a98;
+  --primary: #7c3aed;
+  --accent: #8b5cf6;
+  --accent-strong: #6d28d9;
+  --border: #d9c6ff;
+  --surface-neutral: #e9ddff;
+  --surface-tab-count: #d8b4fe;
+}
+
+body.theme-sunset {
+  --bg: #fff4ea;
+  --card: #fff9f4;
+  --text: #5a2c2c;
+  --muted: #8f5b5b;
+  --primary: #ea580c;
+  --accent: #f97316;
+  --accent-strong: #ea580c;
+  --border: #ffd2b8;
+  --surface-neutral: #ffe3d2;
+  --surface-tab-count: #fdba74;
+}
+
+body.theme-aurora {
+  --bg: #edf7ff;
+  --card: #f8fdff;
+  --text: #11324d;
+  --muted: #3f617d;
+  --primary: #0ea5e9;
+  --accent: #14b8a6;
+  --accent-strong: #0d9488;
+  --border: #b9def7;
+  --surface-neutral: #d6efff;
+  --surface-tab-count: #99f6e4;
+}
+
+body.theme-neon {
+  --bg: #020617;
+  --card: #0b1120;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --primary: #22d3ee;
+  --accent: #a855f7;
+  --accent-strong: #d946ef;
+  --border: #1e293b;
+  --surface-subtle: #0f172a;
+  --surface-soft: #111827;
+  --surface-neutral: #334155;
+}
+
+body.theme-golden-sakura {
+  --bg: #fff7e5;
+  --card: #fffdf7;
+  --text: #5b3900;
+  --muted: #8a6a2f;
+  --primary: #d97706;
+  --accent: #eab308;
+  --accent-strong: #ca8a04;
+  --border: #f3d58a;
+  --surface-neutral: #fde68a;
+  --surface-tab-count: #fcd34d;
+}
+
+body.theme-mythic-pop {
+  --bg: #0f1029;
+  --card: #151738;
+  --text: #f8fafc;
+  --muted: #c4b5fd;
+  --primary: #a78bfa;
+  --accent: #f472b6;
+  --accent-strong: #ec4899;
+  --border: #312e81;
+  --surface-subtle: #1e1b4b;
+  --surface-soft: #2e1065;
+  --surface-neutral: #3730a3;
 }
 
 .page {
@@ -466,6 +558,119 @@ p {
 .theme-preview-mint {
   border-color: #63b89a;
   background: linear-gradient(145deg, #e7fff6 0%, #9fd9c2 48%, #2f7d67 100%);
+}
+
+.theme-preview-lavender {
+  border-color: #a78bfa;
+  background: linear-gradient(145deg, #f5efff 0%, #d8b4fe 48%, #7c3aed 100%);
+}
+
+.theme-preview-sunset {
+  border-color: #fb923c;
+  background: linear-gradient(145deg, #fff1e6 0%, #fdba74 48%, #fb7185 100%);
+}
+
+.theme-preview-aurora {
+  border-color: #5eead4;
+  background: linear-gradient(145deg, #dbeafe 0%, #99f6e4 48%, #0ea5e9 100%);
+}
+
+.theme-preview-neon {
+  border-color: #22d3ee;
+  background: linear-gradient(145deg, #020617 0%, #06b6d4 48%, #d946ef 100%);
+}
+
+.theme-preview-golden-sakura {
+  border-color: #f59e0b;
+  background: linear-gradient(145deg, #fff8dc 0%, #fcd34d 50%, #f9a8d4 100%);
+}
+
+.theme-preview-mythic-pop {
+  border-color: #a78bfa;
+  background: linear-gradient(145deg, #0f172a 0%, #7c3aed 45%, #ec4899 100%);
+}
+
+.theme-paywall {
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+body.theme-neon::before {
+  opacity: 0.35;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(34, 211, 238, 0.28), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(217, 70, 239, 0.25), transparent 30%);
+  animation: neonPulse 6s ease-in-out infinite alternate;
+}
+
+body.theme-golden-sakura::before {
+  opacity: 0.32;
+  background:
+    radial-gradient(circle at 15% 18%, rgba(234, 179, 8, 0.35), transparent 30%),
+    radial-gradient(circle at 72% 12%, rgba(251, 191, 36, 0.3), transparent 26%);
+  animation: glowDrift 10s linear infinite;
+}
+
+body.theme-golden-sakura::after {
+  opacity: 0.24;
+  background-image:
+    radial-gradient(circle, rgba(244, 114, 182, 0.55) 0 20%, transparent 22%),
+    radial-gradient(circle, rgba(253, 224, 71, 0.4) 0 18%, transparent 20%);
+  background-size: 120px 120px, 160px 160px;
+  animation: sakuraFall 18s linear infinite;
+}
+
+body.theme-mythic-pop::before {
+  opacity: 0.4;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(167, 139, 250, 0.35), transparent 30%),
+    radial-gradient(circle at 85% 18%, rgba(244, 114, 182, 0.35), transparent 33%),
+    radial-gradient(circle at 55% 80%, rgba(56, 189, 248, 0.25), transparent 36%);
+  animation: mythicShift 12s ease-in-out infinite alternate;
+}
+
+@keyframes neonPulse {
+  from {
+    transform: scale(1);
+    filter: saturate(1);
+  }
+  to {
+    transform: scale(1.08);
+    filter: saturate(1.25);
+  }
+}
+
+@keyframes glowDrift {
+  from {
+    transform: translateX(-2%) translateY(0);
+  }
+  to {
+    transform: translateX(2%) translateY(1.5%);
+  }
+}
+
+@keyframes sakuraFall {
+  from {
+    background-position:
+      0 -140px,
+      80px -200px;
+  }
+  to {
+    background-position:
+      20px 100vh,
+      -30px 105vh;
+  }
+}
+
+@keyframes mythicShift {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1.5%);
+  }
 }
 
 .operation-success {

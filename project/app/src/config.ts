@@ -12,6 +12,7 @@ export const APP_ENDPOINTS = {
   operations: `${API_BASE_URL}/api/billing/operations`,
   themes: `${API_BASE_URL}/api/billing/themes`,
   createThemePayment: `${API_BASE_URL}/api/billing/create-theme-payment`,
+  selectedTheme: `${API_BASE_URL}/api/billing/selected-theme`,
   vacancies: `${API_BASE_URL}/api/vacancies`,
   vacancyById: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}`,
   vacancyResponses: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}/responses`,

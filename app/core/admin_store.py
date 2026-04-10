@@ -264,6 +264,15 @@ def get_user_access_token(hh_id: str) -> str | None:
     return token if isinstance(token, str) and token else None
 
 
+def get_user_selected_interface(hh_id: str) -> str | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(text('SELECT selected_interface FROM users WHERE hh_id = :hh_id'), {'hh_id': hh_id}).first()
+    if row is None:
+        return None
+    value = row[0]
+    return value if isinstance(value, str) and value else None
+
+
 def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     with ENGINE.connect() as connection:
         row = connection.execute(
@@ -525,6 +534,15 @@ def unlock_theme_for_user(hh_id: str, theme_code: str) -> bool:
         result = connection.execute(
             text('UPDATE users SET unlocked_themes = :themes WHERE hh_id = :hh_id'),
             {'themes': themes_raw, 'hh_id': hh_id},
+        )
+        return result.rowcount > 0
+
+
+def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text('UPDATE users SET selected_interface = :selected_interface WHERE hh_id = :hh_id'),
+            {'selected_interface': selected_interface, 'hh_id': hh_id},
         )
         return result.rowcount > 0
 

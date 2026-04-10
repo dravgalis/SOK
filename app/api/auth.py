@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 
-from ..core.admin_store import get_user_subscription, upsert_hh_user
+from ..core.admin_store import get_user_selected_interface, get_user_subscription, upsert_hh_user
 
 router = APIRouter()
 
@@ -145,6 +145,8 @@ def _track_hh_user_login(
 
     subscription_status, subscription_expires_at = _resolve_subscription_for_login(hh_id)
 
+    selected_interface = get_user_selected_interface(hh_id) or 'default'
+
     upsert_hh_user(
         hh_id=hh_id,
         name=name,
@@ -154,7 +156,7 @@ def _track_hh_user_login(
         responses_count=responses_count,
         subscription_status=subscription_status,
         subscription_expires_at=subscription_expires_at,
-        selected_interface='hh',
+        selected_interface=selected_interface,
         access_token=access_token,
         metrics_updated_at=datetime.now(timezone.utc).isoformat(),
     )
