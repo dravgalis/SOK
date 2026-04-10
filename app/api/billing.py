@@ -11,9 +11,11 @@ from ..core.admin_store import (
     get_payment,
     get_user_billing,
     get_billing_operations,
+    get_user_unlocked_themes,
     mark_payment_failed,
     mark_payment_processed,
     record_payment,
+    unlock_theme_for_user,
     update_user_billing,
     get_users_for_recurring,
 )
@@ -32,6 +34,19 @@ class AutoRenewRequest(BaseModel):
     enabled: bool
 
 
+class CreateThemePaymentRequest(BaseModel):
+    theme_code: Literal['mint']
+
+
+THEME_STORE: dict[str, dict[str, object]] = {
+    'default': {'label': 'Светлая', 'price': 0.0, 'paid': False},
+    'dark': {'label': 'Темно-синяя', 'price': 0.0, 'paid': False},
+    'blue': {'label': 'Синяя', 'price': 0.0, 'paid': False},
+    'beige': {'label': 'Бежевая', 'price': 0.0, 'paid': False},
+    'mint': {'label': 'Зелёная премиум', 'price': 50.0, 'paid': True},
+}
+
+
 @router.post('/create-payment')
 async def create_payment(payload: CreatePaymentRequest, request: Request) -> dict[str, str]:
     hh_id = await _require_hh_id(request)
@@ -47,6 +62,31 @@ async def create_payment(payload: CreatePaymentRequest, request: Request) -> dic
         plan_code=payload.plan_code,
         amount=payment['amount'],
         currency=payment['currency'],
+        product_type='subscription',
+    )
+    return {'confirmation_url': payment['confirmation_url']}
+
+
+@router.post('/create-theme-payment')
+async def create_theme_payment(payload: CreateThemePaymentRequest, request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    theme_info = THEME_STORE.get(payload.theme_code)
+    if theme_info is None or not bool(theme_info.get('paid')):
+        raise HTTPException(status_code=400, detail='Theme is not payable.')
+    service = YooKassaService()
+    try:
+        payment = await service.create_theme_payment(theme_code=payload.theme_code, hh_id=hh_id, amount=float(theme_info['price']))
+    except YooKassaServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    record_payment(
+        payment_id=payment['payment_id'],
+        hh_id=hh_id,
+        plan_code='theme_purchase',
+        amount=payment['amount'],
+        currency=payment['currency'],
+        product_type='theme',
+        theme_code=payload.theme_code,
     )
     return {'confirmation_url': payment['confirmation_url']}
 
@@ -78,7 +118,8 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
         provider_status_raw = obj.get('status')
         provider_status = provider_status_raw if isinstance(provider_status_raw, str) else 'canceled'
         mark_payment_failed(payment_id, reason=reason, provider_status=provider_status)
-        update_user_billing(hh_id=payment_row['hh_id'], status='past_due', sync_legacy_subscription=False)
+        if payment_row.get('product_type') != 'theme':
+            update_user_billing(hh_id=payment_row['hh_id'], status='past_due', sync_legacy_subscription=False)
         return {'ok': True}
 
     already_processed = payment_row['status'] == 'succeeded'
@@ -87,6 +128,12 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
 
     hh_id = payment_row['hh_id']
     plan_code = payment_row['plan_code']
+    if payment_row.get('product_type') == 'theme':
+        theme_code = payment_row.get('theme_code')
+        if isinstance(theme_code, str) and theme_code:
+            unlock_theme_for_user(hh_id, theme_code)
+        return {'ok': True}
+
     print('USER:', hh_id)
     print('PLAN:', plan_code)
     current = get_user_billing(hh_id) or {}
@@ -154,6 +201,25 @@ async def my_operations(request: Request) -> dict[str, object]:
         'total_paid': sum(_safe_float(item.get('amount')) for item in operations if item.get('status') == 'succeeded'),
         'days_left': days_left,
     }
+
+
+@router.get('/themes')
+async def my_themes(request: Request) -> dict[str, object]:
+    hh_id = await _require_hh_id(request)
+    unlocked = get_user_unlocked_themes(hh_id)
+    themes = []
+    for code, item in THEME_STORE.items():
+        is_paid = bool(item.get('paid'))
+        themes.append(
+            {
+                'code': code,
+                'label': item.get('label'),
+                'price': item.get('price'),
+                'paid': is_paid,
+                'unlocked': (not is_paid) or (code in unlocked),
+            }
+        )
+    return {'themes': themes}
 
 
 @router.get('/me')

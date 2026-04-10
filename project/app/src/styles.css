@@ -104,6 +104,19 @@ body.theme-beige {
   --surface-tab-count: #e8c994;
 }
 
+body.theme-mint {
+  --bg: #eaf7f2;
+  --card: #f7fffc;
+  --text: #123228;
+  --muted: #3f6b5d;
+  --primary: #2f7d67;
+  --accent: #2f7d67;
+  --accent-strong: #256853;
+  --border: #b8ddd0;
+  --surface-neutral: #cfeadf;
+  --surface-tab-count: #b4dece;
+}
+
 .page {
   min-height: 100vh;
   display: flex;
@@ -426,6 +439,11 @@ p {
   color: var(--text);
 }
 
+.theme-swatch-price {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .theme-preview-default {
   background: linear-gradient(145deg, #ffffff 0%, #f8fafc 48%, #e2e8f0 100%);
 }
@@ -443,6 +461,11 @@ p {
 .theme-preview-beige {
   border-color: #d6b88c;
   background: linear-gradient(145deg, #fffaf0 0%, #f4e4c6 48%, #d6b88c 100%);
+}
+
+.theme-preview-mint {
+  border-color: #63b89a;
+  background: linear-gradient(145deg, #e7fff6 0%, #9fd9c2 48%, #2f7d67 100%);
 }
 
 .operation-success {

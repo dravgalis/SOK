@@ -10,6 +10,8 @@ export const APP_ENDPOINTS = {
   createPayment: `${API_BASE_URL}/api/billing/create-payment`,
   autoRenew: `${API_BASE_URL}/api/billing/auto-renew`,
   operations: `${API_BASE_URL}/api/billing/operations`,
+  themes: `${API_BASE_URL}/api/billing/themes`,
+  createThemePayment: `${API_BASE_URL}/api/billing/create-theme-payment`,
   vacancies: `${API_BASE_URL}/api/vacancies`,
   vacancyById: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}`,
   vacancyResponses: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}/responses`,

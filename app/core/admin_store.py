@@ -50,6 +50,7 @@ def init_users_table() -> None:
                     payment_method_id TEXT,
                     last_payment_id TEXT,
                     last_payment_at TEXT,
+                    unlocked_themes TEXT,
                     selected_interface TEXT,
                     access_token TEXT,
                     metrics_updated_at TEXT,
@@ -71,6 +72,8 @@ def init_users_table() -> None:
                     status TEXT NOT NULL DEFAULT 'pending',
                     provider_status TEXT,
                     failure_reason TEXT,
+                    product_type TEXT NOT NULL DEFAULT 'subscription',
+                    theme_code TEXT,
                     created_at TEXT NOT NULL,
                     processed_at TEXT
                 )
@@ -124,11 +127,14 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'payment_method_id', 'TEXT')
         _ensure_column(connection, 'users', 'last_payment_id', 'TEXT')
         _ensure_column(connection, 'users', 'last_payment_at', 'TEXT')
+        _ensure_column(connection, 'users', 'unlocked_themes', 'TEXT')
         _ensure_column(connection, 'users', 'selected_interface', 'TEXT')
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
         _ensure_column(connection, 'billing_payments', 'provider_status', 'TEXT')
         _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'product_type', "TEXT NOT NULL DEFAULT 'subscription'")
+        _ensure_column(connection, 'billing_payments', 'theme_code', 'TEXT')
 
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
@@ -386,13 +392,19 @@ def record_payment(
     currency: str,
     status: str = 'pending',
     provider_status: str | None = None,
+    product_type: str = 'subscription',
+    theme_code: str | None = None,
 ) -> None:
     with ENGINE.begin() as connection:
         connection.execute(
             text(
                 '''
-                INSERT INTO billing_payments (payment_id, hh_id, plan_code, amount, currency, status, provider_status, created_at)
-                VALUES (:payment_id, :hh_id, :plan_code, :amount, :currency, :status, :provider_status, :created_at)
+                INSERT INTO billing_payments (
+                    payment_id, hh_id, plan_code, amount, currency, status, provider_status, product_type, theme_code, created_at
+                )
+                VALUES (
+                    :payment_id, :hh_id, :plan_code, :amount, :currency, :status, :provider_status, :product_type, :theme_code, :created_at
+                )
                 ON CONFLICT(payment_id) DO NOTHING
                 '''
             ),
@@ -404,6 +416,8 @@ def record_payment(
                 'currency': currency,
                 'status': status,
                 'provider_status': provider_status,
+                'product_type': product_type,
+                'theme_code': theme_code,
                 'created_at': datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -414,7 +428,9 @@ def get_payment(payment_id: str) -> dict[str, str] | None:
         row = connection.execute(
             text(
                 '''
-                SELECT payment_id, hh_id, plan_code, amount, currency, status, provider_status, failure_reason, created_at, processed_at
+                SELECT
+                    payment_id, hh_id, plan_code, amount, currency, status, provider_status, failure_reason,
+                    product_type, theme_code, created_at, processed_at
                 FROM billing_payments
                 WHERE payment_id = :payment_id
                 '''
@@ -432,8 +448,10 @@ def get_payment(payment_id: str) -> dict[str, str] | None:
         'status': str(row[5]),
         'provider_status': str(row[6]) if row[6] is not None else '',
         'failure_reason': str(row[7]) if row[7] is not None else '',
-        'created_at': str(row[8]) if row[8] is not None else '',
-        'processed_at': str(row[9]) if row[9] is not None else '',
+        'product_type': str(row[8]) if row[8] is not None else 'subscription',
+        'theme_code': str(row[9]) if row[9] is not None else '',
+        'created_at': str(row[10]) if row[10] is not None else '',
+        'processed_at': str(row[11]) if row[11] is not None else '',
     }
 
 
@@ -480,7 +498,7 @@ def get_billing_operations(hh_id: str) -> list[dict[str, str]]:
         rows = connection.execute(
             text(
                 '''
-                SELECT payment_id, plan_code, amount, currency, status, provider_status, failure_reason, created_at, processed_at
+                SELECT payment_id, plan_code, amount, currency, status, provider_status, failure_reason, product_type, theme_code, created_at, processed_at
                 FROM billing_payments
                 WHERE hh_id = :hh_id
                 ORDER BY created_at DESC
@@ -489,6 +507,26 @@ def get_billing_operations(hh_id: str) -> list[dict[str, str]]:
             {'hh_id': hh_id},
         ).mappings()
         return [dict(row) for row in rows]
+
+
+def get_user_unlocked_themes(hh_id: str) -> set[str]:
+    with ENGINE.connect() as connection:
+        row = connection.execute(text('SELECT unlocked_themes FROM users WHERE hh_id = :hh_id'), {'hh_id': hh_id}).first()
+    if row is None or not isinstance(row[0], str) or not row[0]:
+        return set()
+    return {item.strip() for item in row[0].split(',') if item.strip()}
+
+
+def unlock_theme_for_user(hh_id: str, theme_code: str) -> bool:
+    themes = get_user_unlocked_themes(hh_id)
+    themes.add(theme_code)
+    themes_raw = ','.join(sorted(themes))
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text('UPDATE users SET unlocked_themes = :themes WHERE hh_id = :hh_id'),
+            {'themes': themes_raw, 'hh_id': hh_id},
+        )
+        return result.rowcount > 0
 
 
 def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
