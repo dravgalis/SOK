@@ -6,6 +6,9 @@ export const AUTH_ENDPOINTS = {
 
 export const APP_ENDPOINTS = {
   me: `${API_BASE_URL}/api/me`,
+  billingMe: `${API_BASE_URL}/api/billing/me`,
+  createPayment: `${API_BASE_URL}/api/billing/create-payment`,
+  autoRenew: `${API_BASE_URL}/api/billing/auto-renew`,
   vacancies: `${API_BASE_URL}/api/vacancies`,
   vacancyById: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}`,
   vacancyResponses: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}/responses`,
@@ -14,5 +17,6 @@ export const APP_ENDPOINTS = {
 export const APP_ROUTES = {
   login: '/',
   app: '/app',
+  paymentReturn: '/payment-return',
   vacancyDetails: '/app/vacancies/:vacancyId',
 } as const;
