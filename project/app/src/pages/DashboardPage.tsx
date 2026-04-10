@@ -10,10 +10,14 @@ type Me = {
   avatar_url?: string | null;
   company_name?: string | null;
   company_logo_url?: string | null;
-  subscription_status?: string | null;
-  subscription_label?: string | null;
-  subscription_expires_at?: string | null;
-  subscription_days_left?: string | null;
+};
+
+type BillingMe = {
+  plan_code?: string | null;
+  current_period_end?: string | null;
+  days_left?: number;
+  auto_renew_enabled?: boolean;
+  status?: string | null;
 };
 
 type Vacancy = {
@@ -102,7 +106,8 @@ export function DashboardPage() {
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeKey>('default');
-  const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(true);
+  const [billing, setBilling] = useState<BillingMe | null>(null);
+  const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -112,9 +117,10 @@ export function DashboardPage() {
         setLoading(true);
         setError('');
 
-        const [meResponse, vacanciesResponse] = await Promise.all([
+        const [meResponse, vacanciesResponse, billingResponse] = await Promise.all([
           fetch(APP_ENDPOINTS.me, { credentials: 'include' }),
           fetch(APP_ENDPOINTS.vacancies, { credentials: 'include' }),
+          fetch(APP_ENDPOINTS.billingMe, { credentials: 'include' }),
         ]);
 
         if (!meResponse.ok) {
@@ -124,11 +130,17 @@ export function DashboardPage() {
         if (!vacanciesResponse.ok) {
           throw new Error('Не удалось загрузить вакансии.');
         }
+        if (!billingResponse.ok) {
+          throw new Error('Не удалось загрузить подписку.');
+        }
 
         const mePayload = (await meResponse.json()) as Me;
         const vacanciesPayload = (await vacanciesResponse.json()) as VacanciesPayload;
+        const billingPayload = (await billingResponse.json()) as BillingMe;
 
         setMe(mePayload);
+        setBilling(billingPayload);
+        setIsAutoPayEnabled(Boolean(billingPayload.auto_renew_enabled));
         setVacanciesByTab({
           active: vacanciesPayload.active || [],
           archived: vacanciesPayload.archived || [],
@@ -153,12 +165,46 @@ export function DashboardPage() {
   }, [theme]);
 
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
-  const currentPlanTitle = me?.subscription_label || 'Тест 3 дня';
-  const planEndDate = formatPlanEndDate(me?.subscription_expires_at);
-  const planDaysLeft = me?.subscription_days_left ? `${me.subscription_days_left} дн.` : '—';
+  const currentPlanTitle = formatPlanLabel(billing?.plan_code);
+  const planEndDate = formatPlanEndDate(billing?.current_period_end);
+  const planDaysLeft = typeof billing?.days_left === 'number' ? `${billing.days_left} дн.` : '—';
 
   const handleLogout = () => {
     window.location.assign('https://sok-app.onrender.com');
+  };
+
+  const handleRenew = async () => {
+    const planCode = billing?.plan_code || '1_month';
+    const response = await fetch(APP_ENDPOINTS.createPayment, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan_code: planCode }),
+    });
+    if (!response.ok) {
+      throw new Error('Не удалось создать оплату.');
+    }
+    const payload = (await response.json()) as { confirmation_url?: string };
+    if (!payload.confirmation_url) {
+      throw new Error('Платежная ссылка не получена.');
+    }
+    window.location.href = payload.confirmation_url;
+  };
+
+  const handleToggleAutoPay = async () => {
+    const nextValue = !isAutoPayEnabled;
+    setIsAutoPayEnabled(nextValue);
+    const response = await fetch(APP_ENDPOINTS.autoRenew, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: nextValue }),
+    });
+    if (!response.ok) {
+      setIsAutoPayEnabled(!nextValue);
+      throw new Error('Не удалось обновить автоплатеж.');
+    }
+    setBilling((current) => ({ ...(current || {}), auto_renew_enabled: nextValue }));
   };
 
   if (loading) {
@@ -234,7 +280,7 @@ export function DashboardPage() {
                     <span>Осталось: {planDaysLeft}</span>
                   </div>
 
-                  <button type="button" className="settings-secondary-button">
+                  <button type="button" className="settings-secondary-button" onClick={() => void handleRenew()}>
                     Продлить
                   </button>
 
@@ -243,7 +289,7 @@ export function DashboardPage() {
                     <button
                       type="button"
                       className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''}`}
-                      onClick={() => setIsAutoPayEnabled((value) => !value)}
+                      onClick={() => void handleToggleAutoPay()}
                       aria-pressed={isAutoPayEnabled}
                     >
                       <span className="toggle-switch-thumb" />
@@ -306,4 +352,14 @@ export function DashboardPage() {
       </section>
     </main>
   );
+}
+
+function formatPlanLabel(planCode?: string | null): string {
+  const mapping: Record<string, string> = {
+    '1_month': 'Подписка 1 месяц',
+    '6_months': 'Подписка 6 месяцев',
+    '12_months': 'Подписка 1 год',
+  };
+  if (!planCode) return 'Подписка не активна';
+  return mapping[planCode] || planCode;
 }

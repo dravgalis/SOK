@@ -10,6 +10,7 @@ export function AppRouter() {
       <Routes>
         <Route path="/" element={<LoginPage />} />
         <Route path={APP_ROUTES.app} element={<DashboardPage />} />
+        <Route path={APP_ROUTES.paymentReturn} element={<DashboardPage />} />
         <Route path={APP_ROUTES.vacancyDetails} element={<VacancyDetailsPage />} />
         <Route path="*" element={<Navigate to={APP_ROUTES.login} replace />} />
       </Routes>
