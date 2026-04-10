@@ -70,8 +70,8 @@ body.theme-dark {
   --text: #e5e7eb;
   --muted: #94a3b8;
   --primary: #60a5fa;
-  --accent: #10b981;
-  --accent-strong: #059669;
+  --accent: #4f46e5;
+  --accent-strong: #4338ca;
   --border: #1f2937;
   --surface-subtle: #111827;
   --surface-soft: #1e293b;
@@ -84,9 +84,11 @@ body.theme-blue {
   --text: #102a43;
   --muted: #486581;
   --primary: #2f80ed;
-  --accent: #3b82f6;
-  --accent-strong: #2563eb;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
   --border: #bfdbfe;
+  --surface-neutral: #bfdbfe;
+  --surface-tab-count: #93c5fd;
 }
 
 body.theme-beige {
@@ -95,9 +97,11 @@ body.theme-beige {
   --text: #3f2f1f;
   --muted: #7a5c3e;
   --primary: #b7791f;
-  --accent: #d97706;
-  --accent-strong: #b45309;
+  --accent: #b7791f;
+  --accent-strong: #975a16;
   --border: #e6d3b3;
+  --surface-neutral: #f3e1c6;
+  --surface-tab-count: #e8c994;
 }
 
 .page {
@@ -608,6 +612,7 @@ p {
   justify-content: center;
   font-size: 0.8rem;
   padding: 0 6px;
+  color: var(--text-subtle);
 }
 
 .vacancy-tab-active .vacancy-tab-count {

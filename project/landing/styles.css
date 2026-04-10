@@ -327,6 +327,19 @@ p {
   font-size: 0.92rem;
 }
 
+.resume-link {
+  display: inline-flex;
+  margin-top: 6px;
+  color: #60a5fa;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.resume-link:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
 .score-side {
   display: flex;
   align-items: center;
