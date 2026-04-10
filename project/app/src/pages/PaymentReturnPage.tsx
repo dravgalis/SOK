@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { APP_ENDPOINTS, APP_ROUTES } from '../config';
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1200;
+const MAX_RETRIES = 6;
+const RETRY_DELAY_MS = 2000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -21,8 +21,16 @@ export function PaymentReturnPage() {
         const response = await fetch(APP_ENDPOINTS.billingMe, { credentials: 'include' });
 
         if (response.ok) {
-          navigate(APP_ROUTES.app, { replace: true });
-          return;
+          const payload = (await response.json()) as { status?: string };
+          if (payload.status === 'active') {
+            window.sessionStorage.setItem('billing_refresh_pending', '1');
+            navigate(APP_ROUTES.app, { replace: true });
+            return;
+          }
+
+          setStatusText(`Оплата обрабатывается (${attempt}/${MAX_RETRIES})...`);
+          await sleep(RETRY_DELAY_MS);
+          continue;
         }
 
         if (response.status !== 401) {
@@ -31,7 +39,7 @@ export function PaymentReturnPage() {
         }
 
         if (attempt < MAX_RETRIES) {
-          setStatusText(`Проверяем авторизацию (${attempt}/${MAX_RETRIES})...`);
+          setStatusText(`Проверяем авторизацию и оплату (${attempt}/${MAX_RETRIES})...`);
           await sleep(RETRY_DELAY_MS);
           continue;
         }

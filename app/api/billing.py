@@ -62,6 +62,7 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     payment_id = obj.get('id')
     if not isinstance(payment_id, str):
         raise HTTPException(status_code=400, detail='Missing payment id.')
+    print('WEBHOOK RECEIVED', payment_id)
 
     payment_row = get_payment(payment_id)
     if payment_row is None:
@@ -85,11 +86,9 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
         if payment_row is None:
             raise HTTPException(status_code=500, detail='Payment row was not created.')
 
-    if payment_row['status'] == 'succeeded':
-        return {'ok': True}
-
-    if not mark_payment_processed(payment_id, 'succeeded'):
-        return {'ok': True}
+    already_processed = payment_row['status'] == 'succeeded'
+    if not already_processed:
+        already_processed = not mark_payment_processed(payment_id, 'succeeded')
 
     hh_id = payment_row['hh_id']
     plan_code = payment_row['plan_code']
@@ -97,14 +96,19 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     now = datetime.now(timezone.utc)
     duration = _months_for_plan(plan_code)
     current_end = _parse_iso(current.get('current_period_end') if isinstance(current, dict) else None)
-    if current_end and now < current_end:
-        new_end = _add_calendar_months(current_end, duration)
-    else:
-        new_end = _add_calendar_months(now, duration)
-
     payment_method = obj.get('payment_method') if isinstance(obj.get('payment_method'), dict) else {}
-    save_payment_method = payment_method.get('saved') is True
-    payment_method_id = payment_method.get('id') if save_payment_method and isinstance(payment_method.get('id'), str) else None
+    payment_method_id: str | None = None
+    if payment_method and payment_method.get('saved'):
+        method_id_raw = payment_method.get('id')
+        if isinstance(method_id_raw, str) and method_id_raw:
+            payment_method_id = method_id_raw
+
+    if current_end and now < current_end:
+        extended_end = _add_calendar_months(current_end, duration)
+    else:
+        extended_end = _add_calendar_months(now, duration)
+
+    next_period_end = current_end.isoformat() if (already_processed and current_end) else extended_end.isoformat()
 
     update_user_billing(
         hh_id=hh_id,
@@ -112,8 +116,8 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
         amount=payment_row['amount'],
         currency=payment_row['currency'],
         status='active',
-        current_period_end=new_end.isoformat(),
-        payment_method_id=payment_method_id if payment_method_id else None,
+        current_period_end=next_period_end,
+        payment_method_id=payment_method_id if payment_method_id else current.get('payment_method_id'),
         last_payment_id=payment_id,
         last_payment_at=now.isoformat(),
     )

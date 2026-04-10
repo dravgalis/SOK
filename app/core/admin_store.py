@@ -206,7 +206,7 @@ def get_all_users() -> list[dict[str, str | int | None]]:
                 '''
                 SELECT
                     hh_id, name, email, company_name, vacancies_count, responses_count,
-                    subscription_status, subscription_expires_at, selected_interface,
+                    subscription_status, subscription_expires_at, plan_code, current_period_end, billing_status, selected_interface,
                     created_at, last_login
                 FROM users
                 ORDER BY last_login DESC

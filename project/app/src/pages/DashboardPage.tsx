@@ -176,6 +176,36 @@ export function DashboardPage() {
     document.body.classList.add(`theme-${theme}`);
   }, [theme]);
 
+  useEffect(() => {
+    if (window.sessionStorage.getItem('billing_refresh_pending') !== '1') {
+      return;
+    }
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    const intervalId = window.setInterval(async () => {
+      attempts += 1;
+      const response = await fetch(APP_ENDPOINTS.billingMe, { credentials: 'include' });
+      if (!response.ok) {
+        if (attempts >= maxAttempts) {
+          window.sessionStorage.removeItem('billing_refresh_pending');
+          window.clearInterval(intervalId);
+        }
+        return;
+      }
+
+      const payload = (await response.json()) as BillingMe;
+      setBilling(payload);
+      setIsAutoPayEnabled(Boolean(payload.auto_renew_enabled));
+      if (payload.status === 'active' || attempts >= maxAttempts) {
+        window.sessionStorage.removeItem('billing_refresh_pending');
+        window.clearInterval(intervalId);
+      }
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const currentPlanTitle = formatPlanLabel(billing?.plan_code);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
@@ -293,7 +323,7 @@ export function DashboardPage() {
                   </div>
 
                   <button type="button" className="settings-secondary-button" onClick={() => setIsPlanSelectorOpen(true)}>
-                    Продлить
+                    Продлить подписку
                   </button>
 
                   {isPlanSelectorOpen ? (
