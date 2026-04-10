@@ -180,8 +180,7 @@ function buildFallbackTooltipRow(criterion: keyof typeof CRITERIA_LABELS): { tex
 
 function getShortCandidateName(candidateName?: string | null): string {
   if (!candidateName) return 'Кандидат без имени';
-  const [firstName] = candidateName.trim().split(/\s+/);
-  return firstName || 'Кандидат без имени';
+  return candidateName.trim() || 'Кандидат без имени';
 }
 
 export function VacancyDetailsPage() {
