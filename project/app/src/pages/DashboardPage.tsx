@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { APP_ENDPOINTS } from '../config';
+import { APP_ENDPOINTS, APP_ROUTES } from '../config';
 
 type Me = {
   id: string;
@@ -112,7 +112,10 @@ export function DashboardPage() {
   });
   const [activeTab, setActiveTab] = useState<VacancyTabKey>('active');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [theme, setTheme] = useState<ThemeKey>('default');
+  const [theme] = useState<ThemeKey>(() => {
+    const raw = window.localStorage.getItem('app_theme');
+    return raw === 'default' ? 'default' : 'default';
+  });
   const [billing, setBilling] = useState<BillingMe | null>(null);
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
@@ -172,6 +175,7 @@ export function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    window.localStorage.setItem('app_theme', theme);
     document.body.classList.remove('theme-default');
     document.body.classList.add(`theme-${theme}`);
   }, [theme]);
@@ -302,15 +306,9 @@ export function DashboardPage() {
                 <section className="settings-section">
                   <h3>Тема</h3>
                   <span className="settings-label">Текущая тема</span>
-                  <button
-                    type="button"
-                    className={`theme-swatch ${theme === 'default' ? 'theme-swatch-active' : ''}`}
-                    onClick={() => setTheme('default')}
-                    aria-label="Белая тема"
-                    title="Белая тема"
-                  >
-                    <span className="theme-swatch-preview" />
-                  </button>
+                  <Link to={APP_ROUTES.theme} className="settings-secondary-button">
+                    Выбрать тему
+                  </Link>
                 </section>
 
                 <section className="settings-section">
@@ -363,6 +361,9 @@ export function DashboardPage() {
                 </section>
 
                 <section className="settings-section">
+                  <Link to={APP_ROUTES.operations} className="settings-secondary-button">
+                    Операции
+                  </Link>
                   <button type="button" className="settings-logout-button" onClick={handleLogout}>
                     Выйти из аккаунта
                   </button>

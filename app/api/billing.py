@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from ..core.admin_store import (
     get_payment,
     get_user_billing,
+    get_billing_operations,
+    mark_payment_failed,
     mark_payment_processed,
     record_payment,
     update_user_billing,
@@ -52,7 +54,7 @@ async def create_payment(payload: CreatePaymentRequest, request: Request) -> dic
 @router.post('/yookassa/webhook')
 async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     event = payload.get('event')
-    if event != 'payment.succeeded':
+    if event not in {'payment.succeeded', 'payment.canceled'}:
         return {'ok': True}
 
     obj = payload.get('object')
@@ -68,6 +70,16 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     if payment_row is None:
         print('WEBHOOK ERROR: payment not found in billing_payments:', payment_id)
         return {'ok': False}
+
+    if event == 'payment.canceled':
+        cancellation_details = obj.get('cancellation_details') if isinstance(obj.get('cancellation_details'), dict) else {}
+        reason_raw = cancellation_details.get('reason')
+        reason = reason_raw if isinstance(reason_raw, str) and reason_raw else 'payment_canceled'
+        provider_status_raw = obj.get('status')
+        provider_status = provider_status_raw if isinstance(provider_status_raw, str) else 'canceled'
+        mark_payment_failed(payment_id, reason=reason, provider_status=provider_status)
+        update_user_billing(hh_id=payment_row['hh_id'], status='past_due', sync_legacy_subscription=False)
+        return {'ok': True}
 
     already_processed = payment_row['status'] == 'succeeded'
     if not already_processed:
@@ -107,6 +119,41 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
         last_payment_at=now.isoformat(),
     )
     return {'ok': True}
+
+
+@router.get('/operations')
+async def my_operations(request: Request) -> dict[str, object]:
+    hh_id = await _require_hh_id(request)
+    operations = get_billing_operations(hh_id)
+    billing = get_user_billing(hh_id) or {}
+    now = datetime.now(timezone.utc)
+    current_period_end = _parse_iso(billing.get('current_period_end'))
+    days_left = 0
+    if current_period_end:
+        days_left = max(0, ceil((current_period_end - now).total_seconds() / 86400))
+
+    mapped: list[dict[str, object]] = []
+    for operation in operations:
+        plan_code = str(operation.get('plan_code') or '')
+        mapped.append(
+            {
+                'payment_id': operation.get('payment_id'),
+                'plan_code': plan_code,
+                'months_extended': _months_for_plan(plan_code) if plan_code in {'1_month', '6_months', '12_months'} else 0,
+                'amount': operation.get('amount'),
+                'currency': operation.get('currency'),
+                'status': operation.get('status'),
+                'reason': operation.get('failure_reason'),
+                'created_at': operation.get('created_at'),
+                'processed_at': operation.get('processed_at'),
+            }
+        )
+
+    return {
+        'operations': mapped,
+        'total_paid': sum(_safe_float(item.get('amount')) for item in operations if item.get('status') == 'succeeded'),
+        'days_left': days_left,
+    }
 
 
 @router.get('/me')
@@ -210,3 +257,10 @@ def _add_calendar_months(start: datetime, months: int) -> datetime:
     month = ((start.month - 1 + months) % 12) + 1
     day = min(start.day, monthrange(year, month)[1])
     return start.replace(year=year, month=month, day=day)
+
+
+def _safe_float(value: object) -> float:
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return 0.0

@@ -69,6 +69,8 @@ def init_users_table() -> None:
                     amount TEXT NOT NULL,
                     currency TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
+                    provider_status TEXT,
+                    failure_reason TEXT,
                     created_at TEXT NOT NULL,
                     processed_at TEXT
                 )
@@ -125,6 +127,8 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'selected_interface', 'TEXT')
         _ensure_column(connection, 'users', 'access_token', 'TEXT')
         _ensure_column(connection, 'users', 'metrics_updated_at', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'provider_status', 'TEXT')
+        _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
 
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
@@ -381,13 +385,14 @@ def record_payment(
     amount: str,
     currency: str,
     status: str = 'pending',
+    provider_status: str | None = None,
 ) -> None:
     with ENGINE.begin() as connection:
         connection.execute(
             text(
                 '''
-                INSERT INTO billing_payments (payment_id, hh_id, plan_code, amount, currency, status, created_at)
-                VALUES (:payment_id, :hh_id, :plan_code, :amount, :currency, :status, :created_at)
+                INSERT INTO billing_payments (payment_id, hh_id, plan_code, amount, currency, status, provider_status, created_at)
+                VALUES (:payment_id, :hh_id, :plan_code, :amount, :currency, :status, :provider_status, :created_at)
                 ON CONFLICT(payment_id) DO NOTHING
                 '''
             ),
@@ -398,6 +403,7 @@ def record_payment(
                 'amount': amount,
                 'currency': currency,
                 'status': status,
+                'provider_status': provider_status,
                 'created_at': datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -408,7 +414,7 @@ def get_payment(payment_id: str) -> dict[str, str] | None:
         row = connection.execute(
             text(
                 '''
-                SELECT payment_id, hh_id, plan_code, amount, currency, status
+                SELECT payment_id, hh_id, plan_code, amount, currency, status, provider_status, failure_reason, created_at, processed_at
                 FROM billing_payments
                 WHERE payment_id = :payment_id
                 '''
@@ -424,6 +430,10 @@ def get_payment(payment_id: str) -> dict[str, str] | None:
         'amount': str(row[3]),
         'currency': str(row[4]),
         'status': str(row[5]),
+        'provider_status': str(row[6]) if row[6] is not None else '',
+        'failure_reason': str(row[7]) if row[7] is not None else '',
+        'created_at': str(row[8]) if row[8] is not None else '',
+        'processed_at': str(row[9]) if row[9] is not None else '',
     }
 
 
@@ -440,6 +450,45 @@ def mark_payment_processed(payment_id: str, status: str) -> bool:
             {'payment_id': payment_id, 'status': status, 'processed_at': datetime.now(timezone.utc).isoformat()},
         )
         return result.rowcount > 0
+
+
+def mark_payment_failed(payment_id: str, *, reason: str | None, provider_status: str | None) -> bool:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE billing_payments
+                SET status = 'failed',
+                    failure_reason = :failure_reason,
+                    provider_status = :provider_status,
+                    processed_at = :processed_at
+                WHERE payment_id = :payment_id
+                '''
+            ),
+            {
+                'payment_id': payment_id,
+                'failure_reason': reason,
+                'provider_status': provider_status,
+                'processed_at': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        return result.rowcount > 0
+
+
+def get_billing_operations(hh_id: str) -> list[dict[str, str]]:
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT payment_id, plan_code, amount, currency, status, provider_status, failure_reason, created_at, processed_at
+                FROM billing_payments
+                WHERE hh_id = :hh_id
+                ORDER BY created_at DESC
+                '''
+            ),
+            {'hh_id': hh_id},
+        ).mappings()
+        return [dict(row) for row in rows]
 
 
 def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:

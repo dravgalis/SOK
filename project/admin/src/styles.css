@@ -114,3 +114,23 @@ td {
 .tableHeaderRow p {
   margin: 0;
 }
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statusChipSuccess {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.statusChipError {
+  background: #fee2e2;
+  color: #991b1b;
+}

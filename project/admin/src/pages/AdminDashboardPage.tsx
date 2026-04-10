@@ -251,6 +251,9 @@ export function AdminDashboardPage() {
                       <button type="button" onClick={() => navigate(ADMIN_ROUTES.userDetails(user.hh_id))}>
                         Открыть
                       </button>
+                      <button type="button" onClick={() => navigate(ADMIN_ROUTES.userOperations(user.hh_id))}>
+                        Операции
+                      </button>
                     </div>
                   </td>
                 </tr>
