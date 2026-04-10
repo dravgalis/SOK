@@ -324,6 +324,11 @@ p {
   color: #991b1b;
 }
 
+.settings-secondary-button:hover {
+  background: #16a34a;
+  border-color: #15803d;
+}
+
 .settings-toggle-row {
   display: flex;
   justify-content: space-between;
