@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import admin, auth, debug, employer
+from .api import admin, auth, billing, debug, employer
 from .core.admin_store import init_users_table
 
 FRONTEND_ORIGIN = 'https://sok-app.onrender.com'
@@ -43,6 +43,7 @@ def root() -> dict[str, str]:
 
 app.include_router(auth.router, prefix='/api/auth')
 app.include_router(employer.router, prefix='/api')
+app.include_router(billing.router)
 app.include_router(admin.router)
 
 app.include_router(debug.router, prefix='/api/debug')
