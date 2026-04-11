@@ -11,21 +11,27 @@ export type ThemeKey =
   | 'golden-sakura'
   | 'mythic-pop';
 
+const THEME_KEYS: ThemeKey[] = [
+  'default',
+  'dark',
+  'blue',
+  'beige',
+  'mint',
+  'lavender',
+  'sunset',
+  'aurora',
+  'neon',
+  'golden-sakura',
+  'mythic-pop',
+];
+
+export function isThemeKey(value: unknown): value is ThemeKey {
+  return typeof value === 'string' && THEME_KEYS.includes(value as ThemeKey);
+}
+
 export function readTheme(): ThemeKey {
   const raw = window.localStorage.getItem('app_theme');
-  if (
-    raw === 'dark' ||
-    raw === 'blue' ||
-    raw === 'beige' ||
-    raw === 'default' ||
-    raw === 'mint' ||
-    raw === 'lavender' ||
-    raw === 'sunset' ||
-    raw === 'aurora' ||
-    raw === 'neon' ||
-    raw === 'golden-sakura' ||
-    raw === 'mythic-pop'
-  ) {
+  if (isThemeKey(raw)) {
     return raw;
   }
   return 'default';

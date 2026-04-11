@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..core.admin_store import (
     get_payment,
     get_user_billing,
+    get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
     mark_payment_failed,
@@ -232,6 +233,25 @@ async def my_themes(request: Request) -> dict[str, object]:
             }
         )
     return {'themes': themes}
+
+
+@router.get('/selected-theme')
+async def get_selected_theme(request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    unlocked = get_user_unlocked_themes(hh_id)
+
+    current_selected = get_user_selected_interface(hh_id)
+    selected = current_selected or 'default'
+    theme_info = THEME_STORE.get(selected)
+    if theme_info is None:
+        selected = 'default'
+    elif bool(theme_info.get('paid')) and selected not in unlocked:
+        selected = 'default'
+
+    if current_selected != selected:
+        update_user_selected_interface(hh_id, selected)
+
+    return {'selected_theme': selected}
 
 
 @router.patch('/selected-theme')
