@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from calendar import monthrange
 from typing import Literal
@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..core.admin_store import (
     get_payment,
     get_user_billing,
+    get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
     mark_payment_failed,
@@ -234,6 +235,25 @@ async def my_themes(request: Request) -> dict[str, object]:
     return {'themes': themes}
 
 
+@router.get('/selected-theme')
+async def get_selected_theme(request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    unlocked = get_user_unlocked_themes(hh_id)
+
+    current_selected = get_user_selected_interface(hh_id)
+    selected = current_selected or 'default'
+    theme_info = THEME_STORE.get(selected)
+    if theme_info is None:
+        selected = 'default'
+    elif bool(theme_info.get('paid')) and selected not in unlocked:
+        selected = 'default'
+
+    if current_selected != selected:
+        update_user_selected_interface(hh_id, selected)
+
+    return {'selected_theme': selected}
+
+
 @router.patch('/selected-theme')
 async def set_selected_theme(payload: SelectThemeRequest, request: Request) -> dict[str, str]:
     hh_id = await _require_hh_id(request)
@@ -265,19 +285,32 @@ async def my_billing(request: Request) -> dict[str, object]:
         delta_seconds = (current_period_end - now).total_seconds()
         days_left = max(0, ceil(delta_seconds / 86400))
 
-    status = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    status_raw = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    if current_period_end and current_period_end > now:
+        status = 'active'
+    else:
+        status = status_raw
+    if status not in ALLOWED_STATUSES:
+        status = 'inactive'
     return {
         'plan_code': billing.get('plan_code'),
         'current_period_end': current_period_end.isoformat() if current_period_end else None,
         'days_left': days_left,
         'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
-        'status': status if status in ALLOWED_STATUSES else 'inactive',
+        'status': status,
     }
 
 
 @router.patch('/auto-renew')
 async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
     hh_id = await _require_hh_id(request)
+    billing = get_user_billing(hh_id) or {}
+    payment_method_id = billing.get('payment_method_id')
+    if payload.enabled and (not isinstance(payment_method_id, str) or not payment_method_id):
+        raise HTTPException(
+            status_code=400,
+            detail='Автоплатеж недоступен: сначала выполните хотя бы одну успешную оплату подписки.',
+        )
     updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=payload.enabled, sync_legacy_subscription=False)
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
@@ -286,7 +319,8 @@ async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict
 
 async def process_recurring_payments() -> None:
     now = datetime.now(timezone.utc)
-    users = get_users_for_recurring(now.isoformat())
+    pending_cutoff = now.replace(microsecond=0) - timedelta(minutes=30)
+    users = get_users_for_recurring(now.isoformat(), pending_cutoff.isoformat())
     service = YooKassaService()
     for user in users:
         hh_id = str(user.get('hh_id', '')).strip()
