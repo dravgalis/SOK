@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ADMIN_API, ADMIN_ROUTES, ADMIN_STORAGE_KEY } from '../config';
 
@@ -29,6 +29,7 @@ export function AdminSupportMessagesPage() {
 
   const unreadByChatRef = useRef<Record<string, number>>({});
   const hasLoadedChatsRef = useRef(false);
+  const selectedHhIdRef = useRef('');
 
   const canNotify = () => typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
 
@@ -57,7 +58,7 @@ export function AdminSupportMessagesPage() {
 
   const getToken = () => window.localStorage.getItem(ADMIN_STORAGE_KEY);
 
-  const loadChats = async () => {
+  const loadChats = useCallback(async () => {
     const token = getToken();
     if (!token) {
       navigate(ADMIN_ROUTES.login, { replace: true });
@@ -84,17 +85,17 @@ export function AdminSupportMessagesPage() {
         return acc;
       }, {});
       hasLoadedChatsRef.current = true;
-      if (!selectedHhId && nextChats.length > 0) {
-        setSelectedHhId(nextChats[0].hh_id);
+      if (nextChats.length > 0) {
+        setSelectedHhId((prev) => prev || nextChats[0].hh_id);
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить чаты.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
 
-  const loadMessages = async (hhId: string) => {
+  const loadMessages = useCallback(async (hhId: string) => {
     const token = getToken();
     if (!token || !hhId) return;
     const response = await fetch(ADMIN_API.supportChatMessages(hhId), {
@@ -110,25 +111,53 @@ export function AdminSupportMessagesPage() {
       credentials: 'include',
     });
     await loadChats();
-  };
+  }, [loadChats]);
+
+  useEffect(() => {
+    selectedHhIdRef.current = selectedHhId;
+  }, [selectedHhId]);
 
   useEffect(() => {
     void loadChats();
-    const chatsRefreshId = window.setInterval(() => void loadChats(), 5 * 60 * 1000);
     const fullReloadId = window.setInterval(() => window.location.reload(), 30 * 60 * 1000);
+    const fallbackPollingId = window.setInterval(() => void loadChats(), 5 * 60 * 1000);
+    const token = getToken();
+    const events = token ? new EventSource(ADMIN_API.supportEvents(token), { withCredentials: true }) : null;
+
+    const onSupportMessage = (event: MessageEvent<string>) => {
+      let chatId = '';
+      try {
+        const payload = JSON.parse(event.data) as { type?: string; chatId?: string };
+        if (payload.type !== 'support_message') return;
+        chatId = typeof payload.chatId === 'string' ? payload.chatId : '';
+      } catch {
+        return;
+      }
+
+      void loadChats();
+      const currentSelected = selectedHhIdRef.current;
+      if (currentSelected && (!chatId || chatId === currentSelected)) {
+        void loadMessages(currentSelected);
+      }
+    };
+
+    events?.addEventListener('support_message', onSupportMessage as EventListener);
+
     if ('Notification' in window && Notification.permission === 'default') {
       void Notification.requestPermission();
     }
     return () => {
-      window.clearInterval(chatsRefreshId);
+      window.clearInterval(fallbackPollingId);
       window.clearInterval(fullReloadId);
+      events?.removeEventListener('support_message', onSupportMessage as EventListener);
+      events?.close();
     };
-  }, [navigate]);
+  }, [loadChats, loadMessages]);
 
   useEffect(() => {
     if (!selectedHhId) return;
     void loadMessages(selectedHhId);
-  }, [selectedHhId]);
+  }, [selectedHhId, loadMessages]);
 
   const handleReply = async () => {
     const token = getToken();
