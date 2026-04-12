@@ -117,6 +117,7 @@ export function DashboardPage() {
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
   const [accessToast, setAccessToast] = useState<AccessToast | null>(null);
+  const [supportSending, setSupportSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -249,6 +250,28 @@ export function DashboardPage() {
     }
     setIsPlanSelectorOpen(false);
     window.location.href = payload.confirmation_url;
+  };
+
+  const handleSupport = async () => {
+    const message = window.prompt('Опишите ваш вопрос для поддержки:');
+    if (!message || !message.trim()) return;
+    try {
+      setSupportSending(true);
+      const response = await fetch(APP_ENDPOINTS.supportMessage, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error('support_error');
+      }
+      showAccessNotice(undefined, 'Сообщение отправлено в поддержку.');
+    } catch {
+      showAccessNotice(undefined, 'Не удалось отправить сообщение в поддержку.');
+    } finally {
+      setSupportSending(false);
+    }
   };
 
   if (loading) {
@@ -442,6 +465,9 @@ export function DashboardPage() {
             </ul>
           )}
         </div>
+        <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
+          {supportSending ? 'Отправка...' : 'Связаться с поддержкой'}
+        </button>
       </section>
     </main>
   );

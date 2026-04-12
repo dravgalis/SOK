@@ -201,9 +201,14 @@ export function AdminDashboardPage() {
 
         <div className="tableHeaderRow">
           <p>Пользователи, вошедшие через HH: {users.length}</p>
-          <button type="button" onClick={() => void loadUsers()} disabled={refreshing}>
-            {refreshing ? 'Обновляю...' : 'Обновить'}
-          </button>
+          <div className="tableActionsInline">
+            <button type="button" onClick={() => navigate(ADMIN_ROUTES.support)}>
+              Поддержка
+            </button>
+            <button type="button" onClick={() => void loadUsers()} disabled={refreshing}>
+              {refreshing ? 'Обновляю...' : 'Обновить'}
+            </button>
+          </div>
         </div>
         <div className="tableWrapper">
           <table>

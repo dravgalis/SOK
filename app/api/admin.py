@@ -14,6 +14,7 @@ from ..core.admin_store import (
     get_billing_operations,
     get_user_access_token,
     get_users_with_tokens,
+    get_support_messages,
     replace_user_vacancies,
     replace_vacancy_responses,
     update_user_subscription,
@@ -70,6 +71,12 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
     _require_admin_token(authorization)
     await _refresh_metrics_for_stale_users()
     return get_all_users()
+
+
+@router.get('/support-messages')
+async def admin_support_messages(authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'messages': get_support_messages()}
 
 
 @router.patch('/users/{hh_id}/subscription')

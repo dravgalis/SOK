@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..core.admin_store import (
+    add_support_message,
     get_payment,
     get_user_billing,
     get_user_selected_interface,
@@ -42,6 +43,10 @@ class CreateThemePaymentRequest(BaseModel):
 
 class SelectThemeRequest(BaseModel):
     theme_code: str
+
+
+class SupportMessageRequest(BaseModel):
+    message: str
 
 
 THEME_STORE: dict[str, dict[str, object]] = {
@@ -213,6 +218,18 @@ async def my_operations(request: Request) -> dict[str, object]:
         'total_paid': sum(_safe_float(item.get('amount')) for item in operations if item.get('status') == 'succeeded'),
         'days_left': days_left,
     }
+
+
+@router.post('/support-message')
+async def send_support_message(payload: SupportMessageRequest, request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
+    if len(message) > 2000:
+        raise HTTPException(status_code=400, detail='Сообщение слишком длинное (максимум 2000 символов).')
+    message_id = add_support_message(hh_id=hh_id, message=message)
+    return {'message_id': message_id}
 
 
 @router.get('/themes')
