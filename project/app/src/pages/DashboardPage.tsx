@@ -211,6 +211,7 @@ export function DashboardPage() {
   const daysLeft = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const currentPlanTitle = formatPlanLabel(daysLeft);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
+  const daysLeft = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const planDaysLeft = typeof billing?.days_left === 'number' ? `${billing.days_left} дн.` : '—';
   const hasAccess = billing?.status === 'active' && daysLeft > 0;
   const isExpiringSoon = hasAccess && daysLeft <= 3;
