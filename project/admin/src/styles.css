@@ -159,10 +159,18 @@ td {
   text-align: left;
   display: grid;
   gap: 4px;
+  min-height: 100px;
+  align-content: center;
+  position: relative;
 }
 
 .admin-chat-item-active {
   background: #dbeafe;
+}
+
+.admin-chat-company {
+  font-size: 13px;
+  color: #344054;
 }
 
 .admin-chat-thread {

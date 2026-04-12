@@ -12,6 +12,8 @@ type Me = {
   avatar_url?: string | null;
   company_name?: string | null;
   company_logo_url?: string | null;
+  subscription_status?: string | null;
+  subscription_label?: string | null;
 };
 
 type BillingMe = {
@@ -121,6 +123,7 @@ export function DashboardPage() {
   const [supportSending, setSupportSending] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportUnread, setSupportUnread] = useState(0);
+  const [expiringNoticeDismissed, setExpiringNoticeDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -210,12 +213,19 @@ export function DashboardPage() {
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const remainingDays = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const normalizedDaysLeft = Math.max(0, remainingDays);
-  const currentPlanTitle = formatPlanLabel(normalizedDaysLeft);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
   const planDaysLeft = `${normalizedDaysLeft} дн.`;
   const hasAccess = billing?.status === 'active' && normalizedDaysLeft > 0;
+  const trialActive = hasAccess && (me?.subscription_status === 'trial_3d' || billing?.plan_code === 'trial_3d');
+  const currentPlanTitle = trialActive ? 'Тест 3 дня' : formatPlanLabel(normalizedDaysLeft);
   const isExpiringSoon = hasAccess && normalizedDaysLeft <= 3;
   const isExpired = !hasAccess;
+
+  useEffect(() => {
+    if (!isExpiringSoon) {
+      setExpiringNoticeDismissed(false);
+    }
+  }, [isExpiringSoon]);
 
   const showAccessNotice = (event?: MouseEvent<HTMLElement>, text?: string) => {
     if (accessToast) {
@@ -285,9 +295,17 @@ export function DashboardPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
-        {isExpiringSoon ? (
-            <div className="status status-warning">
+        {isExpiringSoon && !expiringNoticeDismissed ? (
+            <div className="status status-warning status-dismissible">
             Внимание: подписка заканчивается через {normalizedDaysLeft} дн. Продлите заранее, чтобы не потерять доступ.
+            <button
+              type="button"
+              className="status-dismiss"
+              onClick={() => setExpiringNoticeDismissed(true)}
+              aria-label="Закрыть предупреждение"
+            >
+              ✕
+            </button>
           </div>
         ) : null}
         {isExpired ? (
