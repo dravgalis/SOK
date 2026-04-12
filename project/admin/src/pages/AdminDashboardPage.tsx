@@ -53,6 +53,7 @@ export function AdminDashboardPage() {
   );
   const [savingByUser, setSavingByUser] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadSupportCount, setUnreadSupportCount] = useState(0);
 
   const toDateInputValue = (value: string | null): string => {
     if (!value) return '';
@@ -93,6 +94,18 @@ export function AdminDashboardPage() {
 
       const payload = (await response.json()) as AdminUser[];
       setUsers(payload);
+      const supportResponse = await fetch(ADMIN_API.supportChats, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        credentials: 'include',
+      });
+      if (supportResponse.ok) {
+        const supportPayload = (await supportResponse.json()) as { chats?: Array<{ unread_by_admin?: number }> };
+        setUnreadSupportCount(
+          (supportPayload.chats || []).reduce((acc, chat) => acc + (chat.unread_by_admin ?? 0), 0)
+        );
+      }
       setSubscriptionDrafts(
         payload.reduce<Record<string, { periodType: string; periodEndsOn: string }>>((acc, user) => {
           acc[user.hh_id] = {
@@ -201,9 +214,15 @@ export function AdminDashboardPage() {
 
         <div className="tableHeaderRow">
           <p>Пользователи, вошедшие через HH: {users.length}</p>
-          <button type="button" onClick={() => void loadUsers()} disabled={refreshing}>
-            {refreshing ? 'Обновляю...' : 'Обновить'}
-          </button>
+          <div className="tableActionsInline">
+            <button type="button" onClick={() => navigate(ADMIN_ROUTES.support)}>
+              Поддержка
+              {unreadSupportCount > 0 ? <span className="admin-badge">{unreadSupportCount}</span> : null}
+            </button>
+            <button type="button" onClick={() => void loadUsers()} disabled={refreshing}>
+              {refreshing ? 'Обновляю...' : 'Обновить'}
+            </button>
+          </div>
         </div>
         <div className="tableWrapper">
           <table>

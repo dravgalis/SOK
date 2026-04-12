@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_ENDPOINTS, APP_ROUTES } from '../config';
+import { SupportChatWidget } from '../components/SupportChatWidget';
 
 type Operation = {
   payment_id: string;
@@ -59,6 +60,11 @@ export function OperationsPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
+        <div className="page-top-link-row">
+          <Link to={APP_ROUTES.app} className="back-link-button">
+            ← Назад в кабинет
+          </Link>
+        </div>
         <h2>Операции</h2>
         <div className="operations-summary-grid">
           <article className="operations-summary-card">
@@ -96,8 +102,8 @@ export function OperationsPage() {
           ))}
         </ul>
 
-        <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
       </section>
+      <SupportChatWidget />
     </main>
   );
 }

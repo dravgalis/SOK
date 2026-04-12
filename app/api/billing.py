@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from calendar import monthrange
 from typing import Literal
@@ -8,11 +8,15 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from ..core.admin_store import (
+    add_support_message,
     get_payment,
     get_user_billing,
+    get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
+    get_support_chat_messages,
     mark_payment_failed,
+    mark_support_messages_read_by_user,
     mark_payment_processed,
     record_payment,
     unlock_theme_for_user,
@@ -41,6 +45,10 @@ class CreateThemePaymentRequest(BaseModel):
 
 class SelectThemeRequest(BaseModel):
     theme_code: str
+
+
+class SupportMessageRequest(BaseModel):
+    message: str
 
 
 THEME_STORE: dict[str, dict[str, object]] = {
@@ -214,6 +222,37 @@ async def my_operations(request: Request) -> dict[str, object]:
     }
 
 
+@router.post('/support-message')
+async def send_support_message(payload: SupportMessageRequest, request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
+    if len(message) > 2000:
+        raise HTTPException(status_code=400, detail='Сообщение слишком длинное (максимум 2000 символов).')
+    message_id = add_support_message(hh_id=hh_id, message=message)
+    return {'message_id': message_id}
+
+
+@router.get('/support-chat')
+async def get_support_chat(request: Request) -> dict[str, object]:
+    hh_id = await _require_hh_id(request)
+    messages = get_support_chat_messages(hh_id)
+    unread_for_user = sum(
+        1
+        for item in messages
+        if item.get('sender_role') == 'admin' and not bool(item.get('read_by_user'))
+    )
+    return {'messages': messages, 'unread_for_user': unread_for_user}
+
+
+@router.post('/support-chat/read')
+async def mark_support_chat_read(request: Request) -> dict[str, int]:
+    hh_id = await _require_hh_id(request)
+    updated = mark_support_messages_read_by_user(hh_id)
+    return {'updated': updated}
+
+
 @router.get('/themes')
 async def my_themes(request: Request) -> dict[str, object]:
     hh_id = await _require_hh_id(request)
@@ -232,6 +271,25 @@ async def my_themes(request: Request) -> dict[str, object]:
             }
         )
     return {'themes': themes}
+
+
+@router.get('/selected-theme')
+async def get_selected_theme(request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    unlocked = get_user_unlocked_themes(hh_id)
+
+    current_selected = get_user_selected_interface(hh_id)
+    selected = current_selected or 'default'
+    theme_info = THEME_STORE.get(selected)
+    if theme_info is None:
+        selected = 'default'
+    elif bool(theme_info.get('paid')) and selected not in unlocked:
+        selected = 'default'
+
+    if current_selected != selected:
+        update_user_selected_interface(hh_id, selected)
+
+    return {'selected_theme': selected}
 
 
 @router.patch('/selected-theme')
@@ -265,32 +323,41 @@ async def my_billing(request: Request) -> dict[str, object]:
         delta_seconds = (current_period_end - now).total_seconds()
         days_left = max(0, ceil(delta_seconds / 86400))
 
-    status = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    status_raw = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    if current_period_end and current_period_end > now:
+        status = 'active'
+    else:
+        status = status_raw
+    if status not in ALLOWED_STATUSES:
+        status = 'inactive'
     return {
         'plan_code': billing.get('plan_code'),
         'current_period_end': current_period_end.isoformat() if current_period_end else None,
         'days_left': days_left,
         'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
-        'status': status if status in ALLOWED_STATUSES else 'inactive',
+        'status': status,
     }
 
 
 @router.patch('/auto-renew')
 async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
     hh_id = await _require_hh_id(request)
-    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=payload.enabled, sync_legacy_subscription=False)
+    if payload.enabled:
+        raise HTTPException(status_code=400, detail='Автосписание временно отключено.')
+    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=False, sync_legacy_subscription=False)
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
-    return {'auto_renew_enabled': payload.enabled}
+    return {'auto_renew_enabled': False}
 
 
 async def process_recurring_payments() -> None:
     now = datetime.now(timezone.utc)
-    users = get_users_for_recurring(now.isoformat())
+    pending_cutoff = now.replace(microsecond=0) - timedelta(minutes=30)
+    users = get_users_for_recurring(now.isoformat(), pending_cutoff.isoformat())
     service = YooKassaService()
     for user in users:
         hh_id = str(user.get('hh_id', '')).strip()
-        plan_code = str(user.get('plan_code', '')).strip()
+        plan_code = '1_month'
         payment_method_id = str(user.get('payment_method_id', '')).strip()
         if not hh_id or not plan_code or not payment_method_id:
             continue
