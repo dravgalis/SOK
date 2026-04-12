@@ -191,8 +191,10 @@ async def get_vacancies(request: Request) -> dict[str, object]:
             archived=True,
         )
 
-    active = [_normalize_vacancy(vacancy, archived=False) for vacancy in active_raw]
-    archived = [_normalize_vacancy(vacancy, archived=True) for vacancy in archived_raw]
+    active_source = _as_vacancy_dict_list(active_raw)
+    archived_source = _as_vacancy_dict_list(archived_raw)
+    active = [_normalize_vacancy(vacancy, archived=False) for vacancy in active_source]
+    archived = [_normalize_vacancy(vacancy, archived=True) for vacancy in archived_source]
 
     return {
         'active': active,
@@ -377,33 +379,86 @@ async def _fetch_all_vacancies(
     archived: bool,
 ) -> list[dict]:
     status_path = 'archived' if archived else 'active'
-
-    preferred_items = await _fetch_paginated_vacancies(
-        client,
-        access_token=access_token,
-        endpoint=f'/employers/{employer_id}/vacancies/{status_path}',
-        params_builder=lambda page, per_page: {
-            'page': str(page),
-            'per_page': str(per_page),
-        },
-    )
+    preferred_error: HTTPException | None = None
+    preferred_items: list[dict] = []
+    try:
+        preferred_items = await _fetch_paginated_vacancies(
+            client,
+            access_token=access_token,
+            endpoint=f'/employers/{employer_id}/vacancies/{status_path}',
+            params_builder=lambda page, per_page: {
+                'page': str(page),
+                'per_page': str(per_page),
+            },
+        )
+    except HTTPException as exc:
+        preferred_error = exc
+        logger.warning(
+            'HH vacancies debug: preferred endpoint failed status=%s archived=%s detail=%s',
+            exc.status_code,
+            archived,
+            exc.detail,
+        )
 
     if preferred_items:
         return preferred_items
 
-    fallback_items = await _fetch_paginated_vacancies(
-        client,
-        access_token=access_token,
-        endpoint='/vacancies',
-        params_builder=lambda page, per_page: {
-            'employer_id': employer_id,
-            'manager_id': manager_id or '',
-            'archived': 'true' if archived else 'false',
-            'page': str(page),
-            'per_page': str(per_page),
-        },
-    )
-    return fallback_items
+    fallback_error: HTTPException | None = None
+    fallback_items: list[dict] = []
+    try:
+        fallback_items = await _fetch_paginated_vacancies(
+            client,
+            access_token=access_token,
+            endpoint='/vacancies',
+            params_builder=lambda page, per_page: {
+                'employer_id': employer_id,
+                'manager_id': manager_id or '',
+                'archived': 'true' if archived else 'false',
+                'page': str(page),
+                'per_page': str(per_page),
+            },
+        )
+    except HTTPException as exc:
+        fallback_error = exc
+        logger.warning(
+            'HH vacancies debug: fallback endpoint failed status=%s archived=%s detail=%s',
+            exc.status_code,
+            archived,
+            exc.detail,
+        )
+
+    if fallback_items:
+        return fallback_items
+
+    if _is_no_vacancies_exception(preferred_error) or _is_no_vacancies_exception(fallback_error):
+        return []
+
+    if preferred_error and fallback_error:
+        logger.error(
+            'HH vacancies critical: both endpoints failed archived=%s preferred_status=%s fallback_status=%s',
+            archived,
+            preferred_error.status_code,
+            fallback_error.status_code,
+        )
+        raise fallback_error
+
+    if preferred_error:
+        logger.error(
+            'HH vacancies critical: preferred endpoint failed without successful fallback archived=%s status=%s',
+            archived,
+            preferred_error.status_code,
+        )
+        raise preferred_error
+
+    if fallback_error:
+        logger.error(
+            'HH vacancies critical: fallback endpoint failed archived=%s status=%s',
+            archived,
+            fallback_error.status_code,
+        )
+        raise fallback_error
+
+    return []
 
 
 async def _fetch_paginated_vacancies(
@@ -457,6 +512,18 @@ def _is_no_vacancies_error(exc: HTTPException) -> bool:
 
     no_data_markers = ('ваканс', 'vacanc', 'not found', 'не найден')
     return any(marker in detail for marker in no_data_markers)
+
+
+def _is_no_vacancies_exception(exc: HTTPException | None) -> bool:
+    if exc is None:
+        return False
+    return _is_no_vacancies_error(exc)
+
+
+def _as_vacancy_dict_list(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
