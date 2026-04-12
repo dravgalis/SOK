@@ -17,7 +17,6 @@ type BillingMe = {
   plan_code?: string | null;
   current_period_end?: string | null;
   days_left?: number;
-  auto_renew_enabled?: boolean;
   status?: string | null;
 };
 
@@ -115,7 +114,6 @@ export function DashboardPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme] = useState<ThemeKey>(() => readTheme());
   const [billing, setBilling] = useState<BillingMe | null>(null);
-  const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
   const [accessToast, setAccessToast] = useState<AccessToast | null>(null);
@@ -151,7 +149,6 @@ export function DashboardPage() {
 
         setMe(mePayload);
         setBilling(billingPayload);
-        setIsAutoPayEnabled(Boolean(billingPayload.auto_renew_enabled));
         if (billingPayload.plan_code && isPlanCode(billingPayload.plan_code)) {
           setSelectedPlan(billingPayload.plan_code);
         }
@@ -197,7 +194,6 @@ export function DashboardPage() {
 
       const payload = (await response.json()) as BillingMe;
       setBilling(payload);
-      setIsAutoPayEnabled(Boolean(payload.auto_renew_enabled));
       if (payload.status === 'active' || attempts >= maxAttempts) {
         window.sessionStorage.removeItem('billing_refresh_pending');
         window.clearInterval(intervalId);
@@ -253,24 +249,6 @@ export function DashboardPage() {
     }
     setIsPlanSelectorOpen(false);
     window.location.href = payload.confirmation_url;
-  };
-
-  const handleToggleAutoPay = async () => {
-    const nextValue = !isAutoPayEnabled;
-    setIsAutoPayEnabled(nextValue);
-    const response = await fetch(APP_ENDPOINTS.autoRenew, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: nextValue }),
-    });
-    if (!response.ok) {
-      setIsAutoPayEnabled(!nextValue);
-      const payload = (await response.json().catch(() => ({}))) as { detail?: string };
-      showAccessNotice(undefined, payload.detail || 'Не удалось обновить автоплатеж.');
-      return;
-    }
-    setBilling((current) => ({ ...(current || {}), auto_renew_enabled: nextValue }));
   };
 
   if (loading) {
@@ -393,18 +371,6 @@ export function DashboardPage() {
                     </div>
                   ) : null}
 
-                  <div className="settings-toggle-row">
-                    <span>Автоплатеж</span>
-                    <button
-                      type="button"
-                      className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''} ${!hasAccess ? 'settings-button-disabled' : ''}`}
-                      onClick={hasAccess ? () => void handleToggleAutoPay() : handleBlockedAction}
-                      aria-pressed={isAutoPayEnabled}
-                      aria-disabled={!hasAccess}
-                    >
-                      <span className="toggle-switch-thumb" />
-                    </button>
-                  </div>
                 </section>
 
                 <section className="settings-section">
@@ -418,9 +384,8 @@ export function DashboardPage() {
                   </Link>
                   <button
                     type="button"
-                    className={`settings-logout-button ${!hasAccess ? 'settings-button-disabled' : ''}`}
-                    onClick={hasAccess ? handleLogout : handleBlockedAction}
-                    aria-disabled={!hasAccess}
+                    className="settings-logout-button"
+                    onClick={handleLogout}
                   >
                     Выйти из аккаунта
                   </button>

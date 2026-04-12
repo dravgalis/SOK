@@ -304,17 +304,12 @@ async def my_billing(request: Request) -> dict[str, object]:
 @router.patch('/auto-renew')
 async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
     hh_id = await _require_hh_id(request)
-    billing = get_user_billing(hh_id) or {}
-    payment_method_id = billing.get('payment_method_id')
-    if payload.enabled and (not isinstance(payment_method_id, str) or not payment_method_id):
-        raise HTTPException(
-            status_code=400,
-            detail='Автоплатеж недоступен: сначала выполните хотя бы одну успешную оплату подписки.',
-        )
-    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=payload.enabled, sync_legacy_subscription=False)
+    if payload.enabled:
+        raise HTTPException(status_code=400, detail='Автосписание временно отключено.')
+    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=False, sync_legacy_subscription=False)
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
-    return {'auto_renew_enabled': payload.enabled}
+    return {'auto_renew_enabled': False}
 
 
 async def process_recurring_payments() -> None:
