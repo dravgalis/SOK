@@ -558,6 +558,13 @@ def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
                   AND payment_method_id IS NOT NULL
                   AND current_period_end IS NOT NULL
                   AND current_period_end <= :now_iso
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM billing_payments bp
+                      WHERE bp.hh_id = users.hh_id
+                        AND bp.product_type = 'subscription'
+                        AND bp.status = 'pending'
+                  )
                 '''
             ),
             {'now_iso': now_iso},
