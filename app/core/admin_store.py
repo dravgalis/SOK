@@ -547,7 +547,7 @@ def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
         return result.rowcount > 0
 
 
-def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
+def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[str, str]]:
     with ENGINE.connect() as connection:
         rows = connection.execute(
             text(
@@ -556,11 +556,21 @@ def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
                 FROM users
                 WHERE auto_renew_enabled = 1
                   AND payment_method_id IS NOT NULL
-                  AND current_period_end IS NOT NULL
-                  AND current_period_end <= :now_iso
+                  AND (
+                      (current_period_end IS NOT NULL AND current_period_end <= :now_iso)
+                      OR billing_status IN ('inactive', 'past_due', 'canceled')
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM billing_payments bp
+                      WHERE bp.hh_id = users.hh_id
+                        AND bp.product_type = 'subscription'
+                        AND bp.status = 'pending'
+                        AND bp.created_at >= :pending_cutoff_iso
+                  )
                 '''
             ),
-            {'now_iso': now_iso},
+            {'now_iso': now_iso, 'pending_cutoff_iso': pending_cutoff_iso},
         ).mappings()
         return [dict(row) for row in rows]
 
