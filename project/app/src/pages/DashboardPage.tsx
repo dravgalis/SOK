@@ -466,7 +466,10 @@ export function DashboardPage() {
   );
 }
 
-function formatPlanLabel(daysLeft: number): string {
+function formatPlanLabel(daysLeft: number, planCode?: string | null): string {
+  if (planCode === 'trial_3d') {
+    return 'Тест 3 дня';
+  }
   if (daysLeft <= 0) return 'Подписка закончилась';
   if (daysLeft <= 31) return 'Подписка 1 месяц';
   if (daysLeft <= 183) return 'Подписка 6 месяцев';
