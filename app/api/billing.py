@@ -26,6 +26,7 @@ from ..core.admin_store import (
     get_users_for_recurring,
     purge_old_support_chats,
 )
+from ..core.support_events import support_events_hub
 from ..services.yookassa_service import YooKassaService, YooKassaServiceError
 
 router = APIRouter(prefix='/api/billing', tags=['billing'])
@@ -230,6 +231,7 @@ async def send_support_message(payload: SupportMessageRequest, request: Request)
     if len(message) > 2000:
         raise HTTPException(status_code=400, detail='Сообщение слишком длинное (максимум 2000 символов).')
     message_id = add_support_message(hh_id=hh_id, message=message)
+    await support_events_hub.emit_support_message(hh_id)
     return {'message_id': message_id}
 
 
