@@ -173,12 +173,13 @@ def _resolve_subscription_for_login(hh_id: str) -> tuple[str | None, str | None,
             expires_at = datetime.fromisoformat(existing_expires_at)
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-            return existing_status, expires_at.isoformat(), bool(existing_trial_3d_granted)
+            if expires_at > now:
+                return existing_status, expires_at.isoformat(), bool(existing_trial_3d_granted)
         except ValueError:
             pass
 
-    if existing_trial_3d_granted is False:
-        return existing_status, existing_expires_at, False
+    if existing_trial_3d_granted:
+        return existing_status, existing_expires_at, True
 
     trial_expires_at = now + timedelta(days=3)
     return 'trial_3d', trial_expires_at.isoformat(), True
