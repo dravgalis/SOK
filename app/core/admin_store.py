@@ -556,8 +556,10 @@ def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[
                 FROM users
                 WHERE auto_renew_enabled = 1
                   AND payment_method_id IS NOT NULL
-                  AND current_period_end IS NOT NULL
-                  AND current_period_end <= :now_iso
+                  AND (
+                      (current_period_end IS NOT NULL AND current_period_end <= :now_iso)
+                      OR billing_status IN ('inactive', 'past_due', 'canceled')
+                  )
                   AND NOT EXISTS (
                       SELECT 1
                       FROM billing_payments bp

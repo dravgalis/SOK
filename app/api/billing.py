@@ -324,7 +324,7 @@ async def process_recurring_payments() -> None:
     service = YooKassaService()
     for user in users:
         hh_id = str(user.get('hh_id', '')).strip()
-        plan_code = str(user.get('plan_code', '')).strip()
+        plan_code = '1_month'
         payment_method_id = str(user.get('payment_method_id', '')).strip()
         if not hh_id or not plan_code or not payment_method_id:
             continue
