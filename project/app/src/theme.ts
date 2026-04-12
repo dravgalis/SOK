@@ -5,11 +5,7 @@ export type ThemeKey =
   | 'beige'
   | 'mint'
   | 'lavender'
-  | 'sunset'
-  | 'aurora'
-  | 'neon'
-  | 'golden-sakura'
-  | 'mythic-pop';
+  | 'neon';
 
 const THEME_KEYS: ThemeKey[] = [
   'default',
@@ -18,11 +14,7 @@ const THEME_KEYS: ThemeKey[] = [
   'beige',
   'mint',
   'lavender',
-  'sunset',
-  'aurora',
   'neon',
-  'golden-sakura',
-  'mythic-pop',
 ];
 
 export function isThemeKey(value: unknown): value is ThemeKey {
@@ -48,11 +40,7 @@ export function applyTheme(theme: ThemeKey, persist = true): void {
     'theme-beige',
     'theme-mint',
     'theme-lavender',
-    'theme-sunset',
-    'theme-aurora',
     'theme-neon',
-    'theme-golden-sakura',
-    'theme-mythic-pop'
   );
   document.body.classList.add(`theme-${theme}`);
 }

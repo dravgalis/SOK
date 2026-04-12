@@ -138,21 +138,29 @@ td {
   text-decoration: none;
 }
 
+.support-layout,
 .admin-chat-layout {
   margin-top: 16px;
-  display: grid;
-  grid-template-columns: 320px 1fr;
+  display: flex;
   gap: 12px;
   min-height: 520px;
+  width: 100%;
 }
 
+.chat-list,
 .admin-chat-list {
+  width: 300px;
+  min-width: 280px;
+  max-width: 320px;
   border: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 8px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   gap: 8px;
+  flex: 0 0 auto;
 }
 
 .admin-chat-item {
@@ -173,7 +181,12 @@ td {
   color: #344054;
 }
 
+
+.chat-content,
 .admin-chat-thread {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 12px;

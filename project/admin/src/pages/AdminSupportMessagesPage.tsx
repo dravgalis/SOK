@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ADMIN_API, ADMIN_ROUTES, ADMIN_STORAGE_KEY } from '../config';
 
@@ -27,6 +27,34 @@ export function AdminSupportMessagesPage() {
   const [loading, setLoading] = useState(true);
   const selectedChat = chats.find((chat) => chat.hh_id === selectedHhId);
 
+  const unreadByChatRef = useRef<Record<string, number>>({});
+  const hasLoadedChatsRef = useRef(false);
+
+  const canNotify = () => typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+
+  const notifyAboutNewMessages = (nextChats: SupportChat[]) => {
+    if (!hasLoadedChatsRef.current || !canNotify()) return;
+
+    const prevUnreadMap = unreadByChatRef.current;
+    const increased = nextChats.filter((chat) => (chat.unread_by_admin ?? 0) > (prevUnreadMap[chat.hh_id] ?? 0));
+    if (!increased.length) return;
+
+    if (increased.length === 1) {
+      const chat = increased[0];
+      const delta = (chat.unread_by_admin ?? 0) - (prevUnreadMap[chat.hh_id] ?? 0);
+      new Notification('Новое сообщение в поддержке', {
+        body: `HH ID: ${chat.hh_id}${chat.company_name ? ` · ${chat.company_name}` : ''} (+${delta})`,
+        tag: `support-chat-${chat.hh_id}` ,
+      });
+      return;
+    }
+
+    new Notification('Новые сообщения в поддержке', {
+      body: `Новых чатов с сообщениями: ${increased.length}`,
+      tag: 'support-chat-multi',
+    });
+  };
+
   const getToken = () => window.localStorage.getItem(ADMIN_STORAGE_KEY);
 
   const loadChats = async () => {
@@ -50,6 +78,12 @@ export function AdminSupportMessagesPage() {
       const payload = (await response.json()) as { chats: SupportChat[] };
       const nextChats = payload.chats || [];
       setChats(nextChats);
+      notifyAboutNewMessages(nextChats);
+      unreadByChatRef.current = nextChats.reduce<Record<string, number>>((acc, chat) => {
+        acc[chat.hh_id] = chat.unread_by_admin ?? 0;
+        return acc;
+      }, {});
+      hasLoadedChatsRef.current = true;
       if (!selectedHhId && nextChats.length > 0) {
         setSelectedHhId(nextChats[0].hh_id);
       }
@@ -80,8 +114,15 @@ export function AdminSupportMessagesPage() {
 
   useEffect(() => {
     void loadChats();
-    const id = window.setInterval(() => void loadChats(), 10000);
-    return () => window.clearInterval(id);
+    const chatsRefreshId = window.setInterval(() => void loadChats(), 5 * 60 * 1000);
+    const fullReloadId = window.setInterval(() => window.location.reload(), 30 * 60 * 1000);
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
+    return () => {
+      window.clearInterval(chatsRefreshId);
+      window.clearInterval(fullReloadId);
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -116,8 +157,8 @@ export function AdminSupportMessagesPage() {
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <div className="admin-chat-layout">
-          <aside className="admin-chat-list">
+        <div className="support-layout admin-chat-layout">
+          <aside className="chat-list admin-chat-list">
             {loading ? <p>Загрузка...</p> : null}
             {chats.map((chat) => (
               <button
@@ -133,7 +174,7 @@ export function AdminSupportMessagesPage() {
               </button>
             ))}
           </aside>
-          <section className="admin-chat-thread">
+          <section className="chat-content admin-chat-thread">
             {selectedHhId ? (
               <h3>
                 Чат c HH ID {selectedHhId}
