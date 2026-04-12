@@ -210,7 +210,7 @@ export function DashboardPage() {
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const remainingDays = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const normalizedDaysLeft = Math.max(0, remainingDays);
-  const currentPlanTitle = formatPlanLabel(normalizedDaysLeft);
+  const currentPlanTitle = formatPlanLabel(normalizedDaysLeft, billing?.plan_code);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
   const planDaysLeft = `${normalizedDaysLeft} дн.`;
   const hasAccess = billing?.status === 'active' && normalizedDaysLeft > 0;
@@ -463,7 +463,10 @@ export function DashboardPage() {
   );
 }
 
-function formatPlanLabel(daysLeft: number): string {
+function formatPlanLabel(daysLeft: number, planCode?: string | null): string {
+  if (planCode === 'trial_3d') {
+    return 'Тест 3 дня';
+  }
   if (daysLeft <= 0) return 'Подписка закончилась';
   if (daysLeft <= 31) return 'Подписка 1 месяц';
   if (daysLeft <= 183) return 'Подписка 6 месяцев';
