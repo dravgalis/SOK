@@ -8,6 +8,10 @@ export const ADMIN_API = {
   vacancyResponses: (hhId: string, vacancyId: string, force = false) =>
     `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies/${vacancyId}/responses${force ? '?force=true' : ''}`,
   supportMessages: 'https://sok-i9cq.onrender.com/admin/support-messages',
+  supportChats: 'https://sok-i9cq.onrender.com/admin/support-chats',
+  supportChatMessages: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}`,
+  supportChatRead: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}/read`,
+  supportChatReply: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}/reply`,
 } as const;
 
 export const ADMIN_ROUTES = {

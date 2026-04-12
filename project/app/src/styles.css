@@ -576,6 +576,20 @@ p {
   justify-content: flex-start;
 }
 
+.back-link-button,
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
 .support-fab {
   position: fixed;
   right: 20px;
@@ -588,10 +602,89 @@ p {
   color: #ffffff;
   font-weight: 600;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.28);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .support-fab:hover {
   background: var(--accent-strong);
+}
+
+.support-badge {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #ffffff;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+.support-chat-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 76px;
+  width: min(380px, calc(100vw - 20px));
+  max-height: 70vh;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.3);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  z-index: 75;
+}
+
+.support-chat-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.support-chat-list {
+  padding: 12px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.support-chat-bubble {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.support-chat-bubble-admin {
+  background: var(--surface-soft);
+}
+
+.support-chat-bubble p,
+.support-chat-bubble small {
+  margin: 0;
+}
+
+.support-chat-input {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.support-chat-input textarea {
+  min-height: 64px;
+  resize: vertical;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  background: var(--card);
+  color: var(--text);
 }
 
 .theme-grid {

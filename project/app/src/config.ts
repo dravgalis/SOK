@@ -14,6 +14,8 @@ export const APP_ENDPOINTS = {
   createThemePayment: `${API_BASE_URL}/api/billing/create-theme-payment`,
   selectedTheme: `${API_BASE_URL}/api/billing/selected-theme`,
   supportMessage: `${API_BASE_URL}/api/billing/support-message`,
+  supportChat: `${API_BASE_URL}/api/billing/support-chat`,
+  supportChatRead: `${API_BASE_URL}/api/billing/support-chat/read`,
   vacancies: `${API_BASE_URL}/api/vacancies`,
   vacancyById: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}`,
   vacancyResponses: (vacancyId: string) => `${API_BASE_URL}/api/vacancies/${vacancyId}/responses`,

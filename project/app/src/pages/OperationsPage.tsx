@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_ENDPOINTS, APP_ROUTES } from '../config';
+import { SupportChatWidget } from '../components/SupportChatWidget';
 
 type Operation = {
   payment_id: string;
@@ -83,7 +84,9 @@ export function OperationsPage() {
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
         <div className="page-top-link-row">
-          <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
+          <Link to={APP_ROUTES.app} className="back-link-button">
+            ← Назад в кабинет
+          </Link>
         </div>
         <h2>Операции</h2>
         <div className="operations-summary-grid">
@@ -122,10 +125,8 @@ export function OperationsPage() {
           ))}
         </ul>
 
-        <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
-          {supportSending ? 'Отправка...' : 'Связаться с поддержкой'}
-        </button>
       </section>
+      <SupportChatWidget />
     </main>
   );
 }

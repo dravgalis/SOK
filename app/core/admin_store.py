@@ -121,6 +121,9 @@ def init_users_table() -> None:
                     message_id TEXT PRIMARY KEY,
                     hh_id TEXT NOT NULL,
                     message TEXT NOT NULL,
+                    sender_role TEXT NOT NULL DEFAULT 'user',
+                    read_by_admin INTEGER NOT NULL DEFAULT 0,
+                    read_by_user INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
                 '''
@@ -148,6 +151,9 @@ def init_users_table() -> None:
         _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
         _ensure_column(connection, 'billing_payments', 'product_type', "TEXT NOT NULL DEFAULT 'subscription'")
         _ensure_column(connection, 'billing_payments', 'theme_code', 'TEXT')
+        _ensure_column(connection, 'support_messages', 'sender_role', "TEXT NOT NULL DEFAULT 'user'")
+        _ensure_column(connection, 'support_messages', 'read_by_admin', 'INTEGER NOT NULL DEFAULT 0')
+        _ensure_column(connection, 'support_messages', 'read_by_user', 'INTEGER NOT NULL DEFAULT 0')
         connection.execute(text('UPDATE users SET auto_renew_enabled = 0 WHERE auto_renew_enabled != 0'))
 
 
@@ -269,20 +275,24 @@ def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count
         )
 
 
-def add_support_message(*, hh_id: str, message: str) -> str:
+def add_support_message(*, hh_id: str, message: str, sender_role: str = 'user') -> str:
     message_id = str(uuid.uuid4())
+    is_admin = sender_role == 'admin'
     with ENGINE.begin() as connection:
         connection.execute(
             text(
                 '''
-                INSERT INTO support_messages (message_id, hh_id, message, created_at)
-                VALUES (:message_id, :hh_id, :message, :created_at)
+                INSERT INTO support_messages (message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at)
+                VALUES (:message_id, :hh_id, :message, :sender_role, :read_by_admin, :read_by_user, :created_at)
                 '''
             ),
             {
                 'message_id': message_id,
                 'hh_id': hh_id,
                 'message': message,
+                'sender_role': 'admin' if is_admin else 'user',
+                'read_by_admin': 1 if is_admin else 0,
+                'read_by_user': 0 if is_admin else 1,
                 'created_at': datetime.now(timezone.utc).isoformat(),
             },
         )
@@ -304,6 +314,78 @@ def get_support_messages(limit: int = 200) -> list[dict[str, str]]:
             {'limit': normalized_limit},
         ).mappings()
         return [dict(row) for row in rows]
+
+
+def get_support_chats(limit: int = 500) -> list[dict[str, object]]:
+    normalized_limit = max(1, min(limit, 2000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT
+                    hh_id,
+                    MAX(created_at) AS last_message_at,
+                    SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) AS unread_by_admin,
+                    SUM(CASE WHEN sender_role = 'admin' AND read_by_user = 0 THEN 1 ELSE 0 END) AS unread_by_user
+                FROM support_messages
+                GROUP BY hh_id
+                ORDER BY
+                    CASE WHEN SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) > 0 THEN 0 ELSE 1 END,
+                    MAX(created_at) DESC
+                LIMIT :limit
+                '''
+            ),
+            {'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def get_support_chat_messages(hh_id: str, limit: int = 300) -> list[dict[str, object]]:
+    normalized_limit = max(1, min(limit, 1000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at
+                FROM support_messages
+                WHERE hh_id = :hh_id
+                ORDER BY created_at ASC
+                LIMIT :limit
+                '''
+            ),
+            {'hh_id': hh_id, 'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def mark_support_messages_read_by_admin(hh_id: str) -> int:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE support_messages
+                SET read_by_admin = 1
+                WHERE hh_id = :hh_id AND sender_role = 'user' AND read_by_admin = 0
+                '''
+            ),
+            {'hh_id': hh_id},
+        )
+        return int(result.rowcount or 0)
+
+
+def mark_support_messages_read_by_user(hh_id: str) -> int:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE support_messages
+                SET read_by_user = 1
+                WHERE hh_id = :hh_id AND sender_role = 'admin' AND read_by_user = 0
+                '''
+            ),
+            {'hh_id': hh_id},
+        )
+        return int(result.rowcount or 0)
 
 
 def get_user_access_token(hh_id: str) -> str | None:

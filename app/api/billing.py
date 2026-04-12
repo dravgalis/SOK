@@ -14,7 +14,9 @@ from ..core.admin_store import (
     get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
+    get_support_chat_messages,
     mark_payment_failed,
+    mark_support_messages_read_by_user,
     mark_payment_processed,
     record_payment,
     unlock_theme_for_user,
@@ -230,6 +232,25 @@ async def send_support_message(payload: SupportMessageRequest, request: Request)
         raise HTTPException(status_code=400, detail='Сообщение слишком длинное (максимум 2000 символов).')
     message_id = add_support_message(hh_id=hh_id, message=message)
     return {'message_id': message_id}
+
+
+@router.get('/support-chat')
+async def get_support_chat(request: Request) -> dict[str, object]:
+    hh_id = await _require_hh_id(request)
+    messages = get_support_chat_messages(hh_id)
+    unread_for_user = sum(
+        1
+        for item in messages
+        if item.get('sender_role') == 'admin' and not bool(item.get('read_by_user'))
+    )
+    return {'messages': messages, 'unread_for_user': unread_for_user}
+
+
+@router.post('/support-chat/read')
+async def mark_support_chat_read(request: Request) -> dict[str, int]:
+    hh_id = await _require_hh_id(request)
+    updated = mark_support_messages_read_by_user(hh_id)
+    return {'updated': updated}
 
 
 @router.get('/themes')

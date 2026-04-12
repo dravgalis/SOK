@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
 from ..core.admin_store import (
+    add_support_message,
     get_all_users,
     get_cached_user_vacancies,
     get_cached_vacancy_responses,
@@ -15,8 +16,11 @@ from ..core.admin_store import (
     get_user_access_token,
     get_users_with_tokens,
     get_support_messages,
+    get_support_chats,
+    get_support_chat_messages,
     replace_user_vacancies,
     replace_vacancy_responses,
+    mark_support_messages_read_by_admin,
     update_user_subscription,
     update_user_billing,
     update_user_metrics,
@@ -34,6 +38,10 @@ class AdminLoginRequest(BaseModel):
 class AdminSubscriptionUpdateRequest(BaseModel):
     period_type: str
     period_ends_on: str | None = None
+
+
+class AdminSupportReplyRequest(BaseModel):
+    message: str
 
 
 def _admin_token() -> str:
@@ -77,6 +85,40 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
 async def admin_support_messages(authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_admin_token(authorization)
     return {'messages': get_support_messages()}
+
+
+@router.get('/support-chats')
+async def admin_support_chats(authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'chats': get_support_chats()}
+
+
+@router.get('/support-chats/{hh_id}')
+async def admin_support_chat_messages(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    messages = get_support_chat_messages(hh_id)
+    return {'hh_id': hh_id, 'messages': messages}
+
+
+@router.post('/support-chats/{hh_id}/read')
+async def admin_mark_support_read(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, int]:
+    _require_admin_token(authorization)
+    updated = mark_support_messages_read_by_admin(hh_id)
+    return {'updated': updated}
+
+
+@router.post('/support-chats/{hh_id}/reply')
+async def admin_reply_support(
+    hh_id: str,
+    payload: AdminSupportReplyRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_admin_token(authorization)
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
+    message_id = add_support_message(hh_id=hh_id, message=message, sender_role='admin')
+    return {'message_id': message_id}
 
 
 @router.patch('/users/{hh_id}/subscription')
