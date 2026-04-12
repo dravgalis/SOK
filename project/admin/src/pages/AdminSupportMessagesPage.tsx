@@ -116,8 +116,8 @@ export function AdminSupportMessagesPage() {
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <div className="admin-chat-layout">
-          <aside className="admin-chat-list">
+        <div className="support-layout admin-chat-layout">
+          <aside className="chat-list admin-chat-list">
             {loading ? <p>Загрузка...</p> : null}
             {chats.map((chat) => (
               <button
@@ -133,7 +133,7 @@ export function AdminSupportMessagesPage() {
               </button>
             ))}
           </aside>
-          <section className="admin-chat-thread">
+          <section className="chat-content admin-chat-thread">
             {selectedHhId ? (
               <h3>
                 Чат c HH ID {selectedHhId}
