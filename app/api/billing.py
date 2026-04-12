@@ -23,6 +23,7 @@ from ..core.admin_store import (
     update_user_selected_interface,
     update_user_billing,
     get_users_for_recurring,
+    purge_old_support_chats,
 )
 from ..services.yookassa_service import YooKassaService, YooKassaServiceError
 
@@ -225,6 +226,7 @@ async def my_operations(request: Request) -> dict[str, object]:
 @router.post('/support-message')
 async def send_support_message(payload: SupportMessageRequest, request: Request) -> dict[str, str]:
     hh_id = await _require_hh_id(request)
+    purge_old_support_chats()
     message = payload.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
@@ -237,6 +239,7 @@ async def send_support_message(payload: SupportMessageRequest, request: Request)
 @router.get('/support-chat')
 async def get_support_chat(request: Request) -> dict[str, object]:
     hh_id = await _require_hh_id(request)
+    purge_old_support_chats()
     messages = get_support_chat_messages(hh_id)
     unread_for_user = sum(
         1
@@ -249,6 +252,7 @@ async def get_support_chat(request: Request) -> dict[str, object]:
 @router.post('/support-chat/read')
 async def mark_support_chat_read(request: Request) -> dict[str, int]:
     hh_id = await _require_hh_id(request)
+    purge_old_support_chats()
     updated = mark_support_messages_read_by_user(hh_id)
     return {'updated': updated}
 

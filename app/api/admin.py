@@ -18,6 +18,7 @@ from ..core.admin_store import (
     get_support_messages,
     get_support_chats,
     get_support_chat_messages,
+    purge_old_support_chats,
     replace_user_vacancies,
     replace_vacancy_responses,
     mark_support_messages_read_by_admin,
@@ -84,18 +85,21 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
 @router.get('/support-messages')
 async def admin_support_messages(authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_admin_token(authorization)
+    purge_old_support_chats()
     return {'messages': get_support_messages()}
 
 
 @router.get('/support-chats')
 async def admin_support_chats(authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_admin_token(authorization)
+    purge_old_support_chats()
     return {'chats': get_support_chats()}
 
 
 @router.get('/support-chats/{hh_id}')
 async def admin_support_chat_messages(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_admin_token(authorization)
+    purge_old_support_chats()
     messages = get_support_chat_messages(hh_id)
     return {'hh_id': hh_id, 'messages': messages}
 

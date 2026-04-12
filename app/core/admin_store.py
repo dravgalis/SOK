@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -323,21 +323,44 @@ def get_support_chats(limit: int = 500) -> list[dict[str, object]]:
             text(
                 '''
                 SELECT
-                    hh_id,
-                    MAX(created_at) AS last_message_at,
-                    SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) AS unread_by_admin,
-                    SUM(CASE WHEN sender_role = 'admin' AND read_by_user = 0 THEN 1 ELSE 0 END) AS unread_by_user
-                FROM support_messages
-                GROUP BY hh_id
+                    sm.hh_id,
+                    u.company_name,
+                    MAX(sm.created_at) AS last_message_at,
+                    SUM(CASE WHEN sm.sender_role = 'user' AND sm.read_by_admin = 0 THEN 1 ELSE 0 END) AS unread_by_admin,
+                    SUM(CASE WHEN sm.sender_role = 'admin' AND sm.read_by_user = 0 THEN 1 ELSE 0 END) AS unread_by_user
+                FROM support_messages sm
+                LEFT JOIN users u ON u.hh_id = sm.hh_id
+                GROUP BY sm.hh_id, u.company_name
                 ORDER BY
-                    CASE WHEN SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) > 0 THEN 0 ELSE 1 END,
-                    MAX(created_at) DESC
+                    CASE WHEN SUM(CASE WHEN sm.sender_role = 'user' AND sm.read_by_admin = 0 THEN 1 ELSE 0 END) > 0 THEN 0 ELSE 1 END,
+                    MAX(sm.created_at) DESC
                 LIMIT :limit
                 '''
             ),
             {'limit': normalized_limit},
         ).mappings()
         return [dict(row) for row in rows]
+
+
+def purge_old_support_chats(days: int = 14) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    cutoff_iso = cutoff.isoformat()
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                DELETE FROM support_messages
+                WHERE hh_id IN (
+                    SELECT hh_id
+                    FROM support_messages
+                    GROUP BY hh_id
+                    HAVING MAX(created_at) < :cutoff_iso
+                )
+                '''
+            ),
+            {'cutoff_iso': cutoff_iso},
+        )
+        return int(result.rowcount or 0)
 
 
 def get_support_chat_messages(hh_id: str, limit: int = 300) -> list[dict[str, object]]:

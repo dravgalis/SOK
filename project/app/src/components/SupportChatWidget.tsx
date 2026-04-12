@@ -13,9 +13,10 @@ type SupportChatWidgetProps = {
   open?: boolean;
   onOpenChange?: (next: boolean) => void;
   hideFab?: boolean;
+  onUnreadChange?: (count: number) => void;
 };
 
-export function SupportChatWidget({ open, onOpenChange, hideFab = false }: SupportChatWidgetProps) {
+export function SupportChatWidget({ open, onOpenChange, hideFab = false, onUnreadChange }: SupportChatWidgetProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -56,6 +57,10 @@ export function SupportChatWidget({ open, onOpenChange, hideFab = false }: Suppo
     };
     void markRead();
   }, [isOpen, unreadCount]);
+
+  useEffect(() => {
+    onUnreadChange?.(unreadCount);
+  }, [onUnreadChange, unreadCount]);
 
   const sortedMessages = useMemo(
     () => [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
@@ -100,8 +105,18 @@ export function SupportChatWidget({ open, onOpenChange, hideFab = false }: Suppo
             ))}
           </div>
           <div className="support-chat-input">
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Введите сообщение..." />
-            <button type="button" onClick={() => void sendMessage()} disabled={sending}>
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              placeholder="Введите сообщение..."
+            />
+            <button type="button" className="support-chat-send" onClick={() => void sendMessage()} disabled={sending}>
               {sending ? 'Отправка...' : 'Отправить'}
             </button>
           </div>

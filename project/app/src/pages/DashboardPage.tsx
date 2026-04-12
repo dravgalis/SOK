@@ -120,6 +120,7 @@ export function DashboardPage() {
   const [accessToast, setAccessToast] = useState<AccessToast | null>(null);
   const [supportSending, setSupportSending] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [supportUnread, setSupportUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -454,9 +455,10 @@ export function DashboardPage() {
         </div>
         <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
           {supportSending ? 'Открываем чат...' : 'Связаться с поддержкой'}
+          {supportUnread > 0 ? <span className="support-badge">{supportUnread}</span> : null}
         </button>
       </section>
-      <SupportChatWidget open={isSupportOpen} onOpenChange={setIsSupportOpen} hideFab />
+      <SupportChatWidget open={isSupportOpen} onOpenChange={setIsSupportOpen} onUnreadChange={setSupportUnread} hideFab />
     </main>
   );
 }
