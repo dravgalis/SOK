@@ -34,6 +34,7 @@ type Vacancy = {
 
 type VacancyTabKey = 'active' | 'archived';
 type PlanCode = '1_month' | '6_months' | '12_months';
+type AccessToast = { x: number; y: number; text: string };
 
 type VacanciesPayload = {
   active: Vacancy[];
@@ -117,7 +118,7 @@ export function DashboardPage() {
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
-  const [accessNotice, setAccessNotice] = useState('');
+  const [accessToast, setAccessToast] = useState<AccessToast | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -207,7 +208,8 @@ export function DashboardPage() {
   }, []);
 
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
-  const currentPlanTitle = formatPlanLabel(billing?.plan_code);
+  const daysLeft = typeof billing?.days_left === 'number' ? billing.days_left : 0;
+  const currentPlanTitle = formatPlanLabel(daysLeft);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
   const daysLeft = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const planDaysLeft = typeof billing?.days_left === 'number' ? `${billing.days_left} дн.` : '—';
@@ -215,17 +217,21 @@ export function DashboardPage() {
   const isExpiringSoon = hasAccess && daysLeft <= 3;
   const isExpired = !hasAccess;
 
-  const showAccessNotice = () => {
-    if (accessNotice) {
+  const showAccessNotice = (event?: MouseEvent<HTMLElement>) => {
+    if (accessToast) {
       return;
     }
-    setAccessNotice('Подписка неактивна. Пожалуйста, оплатите подписку, чтобы пользоваться сервисом.');
-    window.setTimeout(() => setAccessNotice(''), 5000);
+    setAccessToast({
+      text: 'Оплатите подписку, чтобы открыть этот раздел.',
+      x: event?.clientX ?? Math.max(180, window.innerWidth - 260),
+      y: event?.clientY ?? 24,
+    });
+    window.setTimeout(() => setAccessToast(null), 5000);
   };
 
-  const handleBlockedAction = (event: MouseEvent) => {
+  const handleBlockedAction = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault();
-    showAccessNotice();
+    showAccessNotice(event);
   };
 
   const handleLogout = () => {
@@ -299,7 +305,16 @@ export function DashboardPage() {
             Подписка закончилась. Пожалуйста, оплатите подписку, чтобы пользоваться сервисом.
           </div>
         ) : null}
-        {accessNotice ? <div className="status status-error">{accessNotice}</div> : null}
+        {accessToast ? (
+          <div
+            className="access-toast"
+            style={{ left: Math.max(16, accessToast.x - 180), top: Math.max(16, accessToast.y - 56) }}
+            role="status"
+            aria-live="polite"
+          >
+            {accessToast.text}
+          </div>
+        ) : null}
 
         <div className="profile-header-row">
           <div className="profile-header-company">
@@ -382,7 +397,7 @@ export function DashboardPage() {
                     <button
                       type="button"
                       className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''} ${!hasAccess ? 'settings-button-disabled' : ''}`}
-                      onClick={hasAccess ? () => void handleToggleAutoPay() : showAccessNotice}
+                      onClick={hasAccess ? () => void handleToggleAutoPay() : handleBlockedAction}
                       aria-pressed={isAutoPayEnabled}
                       aria-disabled={!hasAccess}
                     >
@@ -403,7 +418,7 @@ export function DashboardPage() {
                   <button
                     type="button"
                     className={`settings-logout-button ${!hasAccess ? 'settings-button-disabled' : ''}`}
-                    onClick={hasAccess ? handleLogout : showAccessNotice}
+                    onClick={hasAccess ? handleLogout : handleBlockedAction}
                     aria-disabled={!hasAccess}
                   >
                     Выйти из аккаунта
@@ -425,7 +440,7 @@ export function DashboardPage() {
                 role="tab"
                 aria-selected={activeTab === tab.key}
                 className={`vacancy-tab ${activeTab === tab.key ? 'vacancy-tab-active' : ''} ${!hasAccess ? 'settings-button-disabled' : ''}`}
-                onClick={hasAccess ? () => setActiveTab(tab.key) : showAccessNotice}
+                onClick={hasAccess ? () => setActiveTab(tab.key) : handleBlockedAction}
               >
                 <span>{tab.label}</span>
                 <span className="vacancy-tab-count">{counts[tab.key] ?? 0}</span>
@@ -466,14 +481,11 @@ export function DashboardPage() {
   );
 }
 
-function formatPlanLabel(planCode?: string | null): string {
-  const mapping: Record<string, string> = {
-    '1_month': 'Подписка 1 месяц',
-    '6_months': 'Подписка 6 месяцев',
-    '12_months': 'Подписка 1 год',
-  };
-  if (!planCode) return 'Подписка не активна';
-  return mapping[planCode] || planCode;
+function formatPlanLabel(daysLeft: number): string {
+  if (daysLeft <= 0) return 'Подписка закончилась';
+  if (daysLeft <= 31) return 'Подписка 1 месяц';
+  if (daysLeft <= 183) return 'Подписка 6 месяцев';
+  return 'Подписка 1 год';
 }
 
 function isPlanCode(value: string): value is PlanCode {
