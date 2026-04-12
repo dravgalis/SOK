@@ -25,6 +25,7 @@ export function OperationsPage() {
   const [payload, setPayload] = useState<OperationsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [supportSending, setSupportSending] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -46,6 +47,28 @@ export function OperationsPage() {
   }, []);
 
   const totalOperations = useMemo(() => payload?.operations.length ?? 0, [payload]);
+
+  const handleSupport = async () => {
+    const message = window.prompt('Опишите ваш вопрос для поддержки:');
+    if (!message || !message.trim()) return;
+    try {
+      setSupportSending(true);
+      const response = await fetch(APP_ENDPOINTS.supportMessage, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error('Не удалось отправить сообщение.');
+      }
+      window.alert('Сообщение отправлено в поддержку.');
+    } catch {
+      window.alert('Ошибка отправки в поддержку.');
+    } finally {
+      setSupportSending(false);
+    }
+  };
 
   if (loading) {
     return (
