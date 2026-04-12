@@ -143,16 +143,23 @@ export function DashboardPage() {
           throw new Error('Не удалось загрузить профиль работодателя.');
         }
 
-        if (!vacanciesResponse.ok) {
-          throw new Error('Не удалось загрузить вакансии.');
-        }
         if (!billingResponse.ok) {
           throw new Error('Не удалось загрузить подписку.');
         }
 
         const mePayload = (await meResponse.json()) as Me;
-        const vacanciesPayload = (await vacanciesResponse.json()) as VacanciesPayload;
         const billingPayload = (await billingResponse.json()) as BillingMe;
+        let vacanciesPayload: VacanciesPayload = {
+          active: [],
+          archived: [],
+          counts: { active: 0, archived: 0 },
+        };
+
+        if (vacanciesResponse.ok) {
+          vacanciesPayload = normalizeVacanciesPayload(await vacanciesResponse.json());
+        } else if (!(await shouldTreatVacanciesAsEmpty(vacanciesResponse))) {
+          throw new Error('Не удалось загрузить вакансии.');
+        }
 
         setMe(mePayload);
         setBilling(billingPayload);
@@ -160,13 +167,10 @@ export function DashboardPage() {
           setSelectedPlan(billingPayload.plan_code);
         }
         setVacanciesByTab({
-          active: vacanciesPayload.active || [],
-          archived: vacanciesPayload.archived || [],
+          active: vacanciesPayload.active,
+          archived: vacanciesPayload.archived,
         });
-        setCounts({
-          active: vacanciesPayload.counts?.active ?? vacanciesPayload.active?.length ?? 0,
-          archived: vacanciesPayload.counts?.archived ?? vacanciesPayload.archived?.length ?? 0,
-        });
+        setCounts(vacanciesPayload.counts);
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Ошибка загрузки данных.');
       } finally {
@@ -446,7 +450,9 @@ export function DashboardPage() {
           {selectedVacancies.length === 0 ? (
             <div className="vacancies-empty">
               <h3>Здесь пока пусто</h3>
-              <p>Во вкладке «{TAB_ITEMS.find((tab) => tab.key === activeTab)?.label}» пока нет вакансий.</p>
+              <p>
+                Во вкладке «{TAB_ITEMS.find((tab) => tab.key === activeTab)?.label}» пока нет вакансий. Создайте их в HH.
+              </p>
             </div>
           ) : (
             <ul className="vacancies-list">
@@ -479,6 +485,91 @@ export function DashboardPage() {
       <SupportChatWidget open={isSupportOpen} onOpenChange={setIsSupportOpen} onUnreadChange={setSupportUnread} hideFab />
     </main>
   );
+}
+
+function normalizeVacanciesPayload(payload: unknown): VacanciesPayload {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Получен невалидный ответ по вакансиям.');
+  }
+
+  const raw = payload as Record<string, unknown>;
+  const active = normalizeVacanciesArray(raw.active);
+  const archived = normalizeVacanciesArray(raw.archived);
+
+  const countsFromPayload = normalizeCounts(raw.counts);
+  return {
+    active,
+    archived,
+    counts: {
+      active: countsFromPayload?.active ?? active.length,
+      archived: countsFromPayload?.archived ?? archived.length,
+    },
+  };
+}
+
+function normalizeVacanciesArray(value: unknown): Vacancy[] {
+  if (value == null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error('Получен невалидный формат списка вакансий.');
+  }
+
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    const idRaw = row.id;
+    if (typeof idRaw !== 'string' && typeof idRaw !== 'number') return [];
+
+    return [
+      {
+        id: String(idRaw),
+        name: typeof row.name === 'string' ? row.name : 'Без названия вакансии',
+        status: typeof row.status === 'string' ? row.status : null,
+        normalized_status: typeof row.normalized_status === 'string' ? row.normalized_status : null,
+        archived: typeof row.archived === 'boolean' ? row.archived : undefined,
+        published_at: typeof row.published_at === 'string' ? row.published_at : null,
+        archived_at: typeof row.archived_at === 'string' ? row.archived_at : null,
+        responses_count: typeof row.responses_count === 'number' ? row.responses_count : 0,
+      },
+    ];
+  });
+}
+
+function normalizeCounts(value: unknown): Record<VacancyTabKey, number> | null {
+  if (value == null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Получен невалидный формат counts по вакансиям.');
+  }
+
+  const row = value as Record<string, unknown>;
+  return {
+    active: asNonNegativeInteger(row.active) ?? 0,
+    archived: asNonNegativeInteger(row.archived) ?? 0,
+  };
+}
+
+function asNonNegativeInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const normalized = Math.floor(value);
+  return normalized >= 0 ? normalized : 0;
+}
+
+async function shouldTreatVacanciesAsEmpty(response: Response): Promise<boolean> {
+  if (response.status === 404 || response.status === 422) {
+    return true;
+  }
+
+  try {
+    const payload = (await response.clone().json()) as Record<string, unknown>;
+    const detail = payload.detail;
+    const message =
+      (typeof detail === 'string' && detail) ||
+      (typeof payload.message === 'string' && payload.message) ||
+      '';
+    const normalized = message.toLowerCase();
+    return normalized.includes('ваканс') || normalized.includes('vacanc') || normalized.includes('not found');
+  } catch {
+    return false;
+  }
 }
 
 function formatPlanLabel(daysLeft: number, planCode?: string | null): string {
