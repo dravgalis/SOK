@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { APP_ENDPOINTS } from '../config';
 
+const VACANCIES_ACCESS_HINT =
+  'Аккаунт не является работодателем или не имеет вакансий на HH, Пожалуйста создайте новые вакансии или авторизуйтесь через аккаунт работодателя HH';
+
 type Me = {
   id: string;
   first_name: string | null;
@@ -38,7 +41,7 @@ export function AppPage() {
         }
 
         if (!vacanciesResponse.ok) {
-          throw new Error('Не удалось загрузить вакансии.');
+          throw new Error(VACANCIES_ACCESS_HINT);
         }
 
         const mePayload = (await meResponse.json()) as Me;

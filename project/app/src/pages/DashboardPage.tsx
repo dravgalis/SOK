@@ -44,6 +44,9 @@ type VacanciesPayload = {
   counts: Record<VacancyTabKey, number>;
 };
 
+const VACANCIES_ACCESS_HINT =
+  'Аккаунт не является работодателем или не имеет вакансий на HH, Пожалуйста создайте новые вакансии или авторизуйтесь через аккаунт работодателя HH';
+
 const TAB_ITEMS: { key: VacancyTabKey; label: string }[] = [
   { key: 'active', label: 'Активные' },
   { key: 'archived', label: 'Архив' },
@@ -575,7 +578,7 @@ async function resolveVacanciesPayload(response: Response): Promise<VacanciesPay
     };
   }
 
-  throw new Error('Не удалось загрузить вакансии.');
+  throw new Error(VACANCIES_ACCESS_HINT);
 }
 
 function formatPlanLabel(daysLeft: number, planCode?: string | null): string {
