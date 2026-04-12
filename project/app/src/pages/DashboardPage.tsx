@@ -143,16 +143,23 @@ export function DashboardPage() {
           throw new Error('Не удалось загрузить профиль работодателя.');
         }
 
-        if (!vacanciesResponse.ok) {
-          throw new Error('Не удалось загрузить вакансии.');
-        }
         if (!billingResponse.ok) {
           throw new Error('Не удалось загрузить подписку.');
         }
 
         const mePayload = (await meResponse.json()) as Me;
-        const vacanciesPayload = normalizeVacanciesPayload(await vacanciesResponse.json());
         const billingPayload = (await billingResponse.json()) as BillingMe;
+        let vacanciesPayload: VacanciesPayload = {
+          active: [],
+          archived: [],
+          counts: { active: 0, archived: 0 },
+        };
+
+        if (vacanciesResponse.ok) {
+          vacanciesPayload = normalizeVacanciesPayload(await vacanciesResponse.json());
+        } else if (!(await shouldTreatVacanciesAsEmpty(vacanciesResponse))) {
+          throw new Error('Не удалось загрузить вакансии.');
+        }
 
         setMe(mePayload);
         setBilling(billingPayload);
@@ -443,7 +450,9 @@ export function DashboardPage() {
           {selectedVacancies.length === 0 ? (
             <div className="vacancies-empty">
               <h3>Здесь пока пусто</h3>
-              <p>Во вкладке «{TAB_ITEMS.find((tab) => tab.key === activeTab)?.label}» пока нет вакансий.</p>
+              <p>
+                Во вкладке «{TAB_ITEMS.find((tab) => tab.key === activeTab)?.label}» пока нет вакансий. Создайте их в HH.
+              </p>
             </div>
           ) : (
             <ul className="vacancies-list">
@@ -542,6 +551,25 @@ function asNonNegativeInteger(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const normalized = Math.floor(value);
   return normalized >= 0 ? normalized : 0;
+}
+
+async function shouldTreatVacanciesAsEmpty(response: Response): Promise<boolean> {
+  if (response.status === 404 || response.status === 422) {
+    return true;
+  }
+
+  try {
+    const payload = (await response.clone().json()) as Record<string, unknown>;
+    const detail = payload.detail;
+    const message =
+      (typeof detail === 'string' && detail) ||
+      (typeof payload.message === 'string' && payload.message) ||
+      '';
+    const normalized = message.toLowerCase();
+    return normalized.includes('ваканс') || normalized.includes('vacanc') || normalized.includes('not found');
+  } catch {
+    return false;
+  }
 }
 
 function formatPlanLabel(daysLeft: number, planCode?: string | null): string {

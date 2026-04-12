@@ -190,6 +190,7 @@ body.theme-neon {
   --bg: #020617;
   --card: #0b1120;
   --text: #e2e8f0;
+  --text-subtle: #cbd5e1;
   --muted: #94a3b8;
   --primary: #22d3ee;
   --accent: #a855f7;
@@ -198,6 +199,7 @@ body.theme-neon {
   --surface-subtle: #0f172a;
   --surface-soft: #111827;
   --surface-neutral: #334155;
+  --surface-tab-count: #22d3ee;
   background: linear-gradient(130deg, #020617, #0f172a, #0e7490, #6d28d9, #0f172a);
   background-size: 320% 320%;
   animation: gradientMove 5s ease infinite;
