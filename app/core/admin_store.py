@@ -42,6 +42,7 @@ def init_users_table() -> None:
                     responses_count INTEGER NOT NULL DEFAULT 0,
                     subscription_status TEXT,
                     subscription_expires_at TEXT,
+                    trial_3d_granted INTEGER NOT NULL DEFAULT 0,
                     plan_code TEXT,
                     billing_amount TEXT,
                     billing_currency TEXT,
@@ -134,6 +135,7 @@ def init_users_table() -> None:
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'subscription_status', 'TEXT')
         _ensure_column(connection, 'users', 'subscription_expires_at', 'TEXT')
+        _ensure_column(connection, 'users', 'trial_3d_granted', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'plan_code', 'TEXT')
         _ensure_column(connection, 'users', 'billing_amount', 'TEXT')
         _ensure_column(connection, 'users', 'billing_currency', 'TEXT')
@@ -179,6 +181,7 @@ def upsert_hh_user(
     responses_count: int,
     subscription_status: str | None,
     subscription_expires_at: str | None,
+    trial_3d_granted: bool,
     selected_interface: str | None,
     access_token: str | None,
     metrics_updated_at: str | None,
@@ -191,11 +194,11 @@ def upsert_hh_user(
                 '''
                 INSERT INTO users (
                     hh_id, name, email, company_name, vacancies_count, responses_count, subscription_status,
-                    subscription_expires_at, selected_interface, access_token, metrics_updated_at, created_at, last_login
+                    subscription_expires_at, trial_3d_granted, selected_interface, access_token, metrics_updated_at, created_at, last_login
                 )
                 VALUES (
                     :hh_id, :name, :email, :company_name, :vacancies_count, :responses_count, :subscription_status,
-                    :subscription_expires_at, :selected_interface, :access_token, :metrics_updated_at, :created_at, :last_login
+                    :subscription_expires_at, :trial_3d_granted, :selected_interface, :access_token, :metrics_updated_at, :created_at, :last_login
                 )
                 ON CONFLICT(hh_id) DO UPDATE SET
                     name = excluded.name,
@@ -205,6 +208,7 @@ def upsert_hh_user(
                     responses_count = excluded.responses_count,
                     subscription_status = excluded.subscription_status,
                     subscription_expires_at = excluded.subscription_expires_at,
+                    trial_3d_granted = excluded.trial_3d_granted,
                     selected_interface = excluded.selected_interface,
                     access_token = excluded.access_token,
                     metrics_updated_at = excluded.metrics_updated_at,
@@ -220,6 +224,7 @@ def upsert_hh_user(
                 'responses_count': responses_count,
                 'subscription_status': subscription_status,
                 'subscription_expires_at': subscription_expires_at,
+                'trial_3d_granted': 1 if trial_3d_granted else 0,
                 'selected_interface': selected_interface,
                 'access_token': access_token,
                 'metrics_updated_at': metrics_updated_at,
@@ -236,7 +241,8 @@ def get_all_users() -> list[dict[str, str | int | None]]:
                 '''
                 SELECT
                     hh_id, name, email, company_name, vacancies_count, responses_count,
-                    subscription_status, subscription_expires_at, plan_code, current_period_end, billing_status, selected_interface,
+                    subscription_status, subscription_expires_at, trial_3d_granted,
+                    plan_code, current_period_end, billing_status, selected_interface,
                     created_at, last_login
                 FROM users
                 ORDER BY last_login DESC
@@ -444,6 +450,19 @@ def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     status_value = status_raw if isinstance(status_raw, str) and status_raw else None
     expires_value = expires_raw if isinstance(expires_raw, str) and expires_raw else None
     return status_value, expires_value
+
+
+def get_user_trial_3d_granted(hh_id: str) -> bool | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text('SELECT trial_3d_granted FROM users WHERE hh_id = :hh_id'),
+            {'hh_id': hh_id},
+        ).first()
+
+    if row is None:
+        return None
+
+    return bool(row[0])
 
 
 def get_user_billing(hh_id: str) -> dict[str, str | bool | None] | None:
@@ -731,22 +750,27 @@ def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[
         return [dict(row) for row in rows]
 
 
-def update_user_subscription(*, hh_id: str, subscription_status: str | None, subscription_expires_at: str | None) -> bool:
+def update_user_subscription(
+    *,
+    hh_id: str,
+    subscription_status: str | None,
+    subscription_expires_at: str | None,
+    trial_3d_granted: bool | None = None,
+) -> bool:
+    set_parts = ['subscription_status = :subscription_status', 'subscription_expires_at = :subscription_expires_at']
+    params: dict[str, object] = {
+        'hh_id': hh_id,
+        'subscription_status': subscription_status,
+        'subscription_expires_at': subscription_expires_at,
+    }
+    if trial_3d_granted is not None:
+        set_parts.append('trial_3d_granted = :trial_3d_granted')
+        params['trial_3d_granted'] = 1 if trial_3d_granted else 0
+
     with ENGINE.begin() as connection:
         result = connection.execute(
-            text(
-                '''
-                UPDATE users
-                SET subscription_status = :subscription_status,
-                    subscription_expires_at = :subscription_expires_at
-                WHERE hh_id = :hh_id
-                '''
-            ),
-            {
-                'hh_id': hh_id,
-                'subscription_status': subscription_status,
-                'subscription_expires_at': subscription_expires_at,
-            },
+            text(f"UPDATE users SET {', '.join(set_parts)} WHERE hh_id = :hh_id"),
+            params,
         )
         return result.rowcount > 0
 
