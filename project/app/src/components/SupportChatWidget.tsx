@@ -92,7 +92,7 @@ export function SupportChatWidget({ open, onOpenChange, hideFab = false, onUnrea
         <div className="support-chat-panel">
           <div className="support-chat-head">
             <strong>Поддержка</strong>
-            <button type="button" onClick={() => setOpen(false)}>
+            <button type="button" className="support-chat-close" onClick={() => setOpen(false)} aria-label="Закрыть чат">
               ✕
             </button>
           </div>

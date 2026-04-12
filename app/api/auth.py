@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Query
 from fastapi.responses import RedirectResponse
 
-from ..core.admin_store import get_user_selected_interface, get_user_subscription, upsert_hh_user
+from ..core.admin_store import get_user_selected_interface, get_user_subscription, get_user_trial_3d_granted, upsert_hh_user
 
 router = APIRouter()
 
@@ -143,7 +143,7 @@ def _track_hh_user_login(
     email_raw = payload.get('email')
     email = email_raw if isinstance(email_raw, str) and email_raw else None
 
-    subscription_status, subscription_expires_at = _resolve_subscription_for_login(hh_id)
+    subscription_status, subscription_expires_at, trial_3d_granted = _resolve_subscription_for_login(hh_id)
 
     selected_interface = get_user_selected_interface(hh_id) or 'default'
 
@@ -156,27 +156,32 @@ def _track_hh_user_login(
         responses_count=responses_count,
         subscription_status=subscription_status,
         subscription_expires_at=subscription_expires_at,
+        trial_3d_granted=trial_3d_granted,
         selected_interface=selected_interface,
         access_token=access_token,
         metrics_updated_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
-def _resolve_subscription_for_login(hh_id: str) -> tuple[str | None, str | None]:
+def _resolve_subscription_for_login(hh_id: str) -> tuple[str | None, str | None, bool]:
     now = datetime.now(timezone.utc)
     existing_status, existing_expires_at = get_user_subscription(hh_id)
+    existing_trial_3d_granted = get_user_trial_3d_granted(hh_id)
 
     if existing_status and existing_expires_at:
         try:
             expires_at = datetime.fromisoformat(existing_expires_at)
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-            return existing_status, expires_at.isoformat()
+            return existing_status, expires_at.isoformat(), bool(existing_trial_3d_granted)
         except ValueError:
             pass
 
+    if existing_trial_3d_granted is False:
+        return existing_status, existing_expires_at, False
+
     trial_expires_at = now + timedelta(days=3)
-    return 'trial_3d', trial_expires_at.isoformat()
+    return 'trial_3d', trial_expires_at.isoformat(), True
 
 
 async def _load_hh_metrics(
