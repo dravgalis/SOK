@@ -9,6 +9,7 @@ type AdminUser = {
   company_name: string | null;
   subscription_status: string | null;
   subscription_expires_at: string | null;
+  trial_3d_granted: number | boolean | null;
   plan_code?: string | null;
   current_period_end?: string | null;
   billing_status?: string | null;
@@ -35,6 +36,7 @@ function getAdminPeriodLabel(status: string | null): string {
   if (!status) return '—';
 
   const labelMap: Record<string, string> = {
+    inactive: 'Без подписки',
     trial_3d: 'Тест 3 дня',
     paid_1m: 'Оплачено: 1 месяц',
     paid_6m: 'Оплачено: 6 месяцев',
@@ -48,7 +50,9 @@ export function AdminDashboardPage() {
   const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [error, setError] = useState('');
-  const [subscriptionDrafts, setSubscriptionDrafts] = useState<Record<string, { periodType: string; periodEndsOn: string }>>(
+  const [subscriptionDrafts, setSubscriptionDrafts] = useState<
+    Record<string, { periodType: string; periodEndsOn: string; trial3dGranted: boolean }>
+  >(
     {}
   );
   const [savingByUser, setSavingByUser] = useState<Record<string, boolean>>({});
@@ -107,10 +111,11 @@ export function AdminDashboardPage() {
         );
       }
       setSubscriptionDrafts(
-        payload.reduce<Record<string, { periodType: string; periodEndsOn: string }>>((acc, user) => {
+        payload.reduce<Record<string, { periodType: string; periodEndsOn: string; trial3dGranted: boolean }>>((acc, user) => {
           acc[user.hh_id] = {
-            periodType: user.subscription_status ?? 'trial_3d',
+            periodType: user.subscription_status ?? 'inactive',
             periodEndsOn: toDateInputValue(user.subscription_expires_at),
+            trial3dGranted: Boolean(user.trial_3d_granted),
           };
           return acc;
         }, {})
@@ -138,12 +143,13 @@ export function AdminDashboardPage() {
     return () => window.clearInterval(intervalId);
   }, [navigate]);
 
-  const updateDraft = (hhId: string, patch: Partial<{ periodType: string; periodEndsOn: string }>) => {
+  const updateDraft = (hhId: string, patch: Partial<{ periodType: string; periodEndsOn: string; trial3dGranted: boolean }>) => {
     setSubscriptionDrafts((previous) => ({
       ...previous,
       [hhId]: {
-        periodType: previous[hhId]?.periodType ?? 'trial_3d',
+        periodType: previous[hhId]?.periodType ?? 'inactive',
         periodEndsOn: previous[hhId]?.periodEndsOn ?? '',
+        trial3dGranted: previous[hhId]?.trial3dGranted ?? false,
         ...patch,
       },
     }));
@@ -173,6 +179,7 @@ export function AdminDashboardPage() {
         body: JSON.stringify({
           period_type: draft.periodType,
           period_ends_on: draft.periodEndsOn || null,
+          trial_3d_granted: draft.trial3dGranted,
         }),
       });
 
@@ -186,7 +193,12 @@ export function AdminDashboardPage() {
         throw new Error('Не удалось сохранить период.');
       }
 
-      const updated = (await response.json()) as { hh_id: string; subscription_status: string; subscription_expires_at: string | null };
+      const updated = (await response.json()) as {
+        hh_id: string;
+        subscription_status: string | null;
+        subscription_expires_at: string | null;
+        trial_3d_granted: boolean | null;
+      };
       setUsers((previous) =>
         previous.map((user) =>
           user.hh_id === updated.hh_id
@@ -194,6 +206,7 @@ export function AdminDashboardPage() {
                 ...user,
                 subscription_status: updated.subscription_status,
                 subscription_expires_at: updated.subscription_expires_at,
+                trial_3d_granted: updated.trial_3d_granted,
               }
             : user
         )
@@ -232,6 +245,7 @@ export function AdminDashboardPage() {
                 <th>Пользователь</th>
                 <th>Последний вход</th>
                 <th>Тип подписки</th>
+                <th>Триал 3 дня</th>
                 <th>Окончание подписки</th>
                 <th>Биллинг</th>
                 <th>Интерфейс</th>
@@ -247,14 +261,26 @@ export function AdminDashboardPage() {
                   <td>
                     <select
                       className="tableSelect"
-                      value={subscriptionDrafts[user.hh_id]?.periodType ?? 'trial_3d'}
+                      value={subscriptionDrafts[user.hh_id]?.periodType ?? 'inactive'}
                       onChange={(event) => updateDraft(user.hh_id, { periodType: event.target.value })}
                     >
+                      <option value="inactive">Без подписки</option>
                       <option value="trial_3d">Тест 3 дня</option>
                       <option value="paid_1m">Оплачено: 1 месяц</option>
                       <option value="paid_6m">Оплачено: 6 месяцев</option>
                       <option value="paid_1y">Оплачено: 1 год</option>
                     </select>
+                  </td>
+                  <td>
+                    <select
+                      className="tableSelect"
+                      value={subscriptionDrafts[user.hh_id]?.trial3dGranted ? 'yes' : 'no'}
+                      onChange={(event) => updateDraft(user.hh_id, { trial3dGranted: event.target.value === 'yes' })}
+                    >
+                      <option value="yes">Было</option>
+                      <option value="no">Не было</option>
+                    </select>
+                    <div className="tableMetaText">Сейчас: {Boolean(user.trial_3d_granted) ? 'Было' : 'Не было'}</div>
                   </td>
                   <td>
                     <input

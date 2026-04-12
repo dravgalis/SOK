@@ -4,6 +4,7 @@ import { ADMIN_API, ADMIN_ROUTES, ADMIN_STORAGE_KEY } from '../config';
 
 type SupportChat = {
   hh_id: string;
+  company_name: string | null;
   unread_by_admin: number;
   last_message_at: string;
 };
@@ -24,6 +25,7 @@ export function AdminSupportMessagesPage() {
   const [replyText, setReplyText] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const selectedChat = chats.find((chat) => chat.hh_id === selectedHhId);
 
   const getToken = () => window.localStorage.getItem(ADMIN_STORAGE_KEY);
 
@@ -125,13 +127,21 @@ export function AdminSupportMessagesPage() {
                 onClick={() => setSelectedHhId(chat.hh_id)}
               >
                 <strong>HH ID: {chat.hh_id}</strong>
+                <span className="admin-chat-company">Компания: {chat.company_name || 'Не указана'}</span>
                 <small>{chat.last_message_at ? new Date(chat.last_message_at).toLocaleString() : '—'}</small>
                 {chat.unread_by_admin > 0 ? <span className="admin-badge">{chat.unread_by_admin}</span> : null}
               </button>
             ))}
           </aside>
           <section className="admin-chat-thread">
-            {selectedHhId ? <h3>Чат с {selectedHhId}</h3> : <h3>Выберите чат</h3>}
+            {selectedHhId ? (
+              <h3>
+                Чат c HH ID {selectedHhId}
+                {selectedChat?.company_name ? ` · ${selectedChat.company_name}` : ''}
+              </h3>
+            ) : (
+              <h3>Выберите чат</h3>
+            )}
             <div className="admin-chat-messages">
               {messages.map((item) => (
                 <div key={item.message_id} className={`admin-chat-bubble ${item.sender_role === 'admin' ? 'admin-chat-bubble-me' : ''}`}>

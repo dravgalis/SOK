@@ -11,6 +11,7 @@ from ..core.admin_store import (
     add_support_message,
     get_payment,
     get_user_billing,
+    get_user_subscription,
     get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
@@ -322,6 +323,12 @@ async def my_billing(request: Request) -> dict[str, object]:
 
     now = datetime.now(timezone.utc)
     current_period_end = _parse_iso(billing.get('current_period_end') if isinstance(billing, dict) else None)
+    subscription_status, subscription_expires_at = get_user_subscription(hh_id)
+    subscription_period_end = _parse_iso(subscription_expires_at)
+
+    if subscription_period_end and (current_period_end is None or subscription_period_end > current_period_end):
+        current_period_end = subscription_period_end
+
     days_left = 0
     if current_period_end:
         delta_seconds = (current_period_end - now).total_seconds()
@@ -334,8 +341,14 @@ async def my_billing(request: Request) -> dict[str, object]:
         status = status_raw
     if status not in ALLOWED_STATUSES:
         status = 'inactive'
+
+    plan_code = billing.get('plan_code')
+    if not isinstance(plan_code, str) or not plan_code:
+        if subscription_status == 'trial_3d':
+            plan_code = 'trial_3d'
+
     return {
-        'plan_code': billing.get('plan_code'),
+        'plan_code': plan_code,
         'current_period_end': current_period_end.isoformat() if current_period_end else None,
         'days_left': days_left,
         'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
