@@ -9,12 +9,25 @@ type SupportMessage = {
   created_at: string;
 };
 
-export function SupportChatWidget() {
-  const [open, setOpen] = useState(false);
+type SupportChatWidgetProps = {
+  open?: boolean;
+  onOpenChange?: (next: boolean) => void;
+  hideFab?: boolean;
+};
+
+export function SupportChatWidget({ open, onOpenChange, hideFab = false }: SupportChatWidgetProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const [sending, setSending] = useState(false);
+  const isOpen = typeof open === 'boolean' ? open : internalOpen;
+  const setOpen = (next: boolean) => {
+    if (typeof open !== 'boolean') {
+      setInternalOpen(next);
+    }
+    onOpenChange?.(next);
+  };
 
   const loadChat = async () => {
     const response = await fetch(APP_ENDPOINTS.supportChat, { credentials: 'include' });
@@ -33,7 +46,7 @@ export function SupportChatWidget() {
   }, []);
 
   useEffect(() => {
-    if (!open || unreadCount <= 0) return;
+    if (!isOpen || unreadCount <= 0) return;
     const markRead = async () => {
       await fetch(APP_ENDPOINTS.supportChatRead, {
         method: 'POST',
@@ -42,7 +55,7 @@ export function SupportChatWidget() {
       setUnreadCount(0);
     };
     void markRead();
-  }, [open, unreadCount]);
+  }, [isOpen, unreadCount]);
 
   const sortedMessages = useMemo(
     () => [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
@@ -70,7 +83,7 @@ export function SupportChatWidget() {
 
   return (
     <div className="support-widget">
-      {open ? (
+      {isOpen ? (
         <div className="support-chat-panel">
           <div className="support-chat-head">
             <strong>Поддержка</strong>
@@ -94,10 +107,12 @@ export function SupportChatWidget() {
           </div>
         </div>
       ) : null}
-      <button type="button" className="support-fab" onClick={() => setOpen((value) => !value)}>
-        Связаться с поддержкой
-        {unreadCount > 0 ? <span className="support-badge">{unreadCount}</span> : null}
-      </button>
+      {!hideFab ? (
+        <button type="button" className="support-fab" onClick={() => setOpen(!isOpen)}>
+          Связаться с поддержкой
+          {unreadCount > 0 ? <span className="support-badge">{unreadCount}</span> : null}
+        </button>
+      ) : null}
     </div>
   );
 }

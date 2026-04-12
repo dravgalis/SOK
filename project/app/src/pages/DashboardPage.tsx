@@ -118,6 +118,8 @@ export function DashboardPage() {
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
   const [accessToast, setAccessToast] = useState<AccessToast | null>(null);
+  const [supportSending, setSupportSending] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -251,6 +253,12 @@ export function DashboardPage() {
     }
     setIsPlanSelectorOpen(false);
     window.location.href = payload.confirmation_url;
+  };
+
+  const handleSupport = async (): Promise<void> => {
+    setSupportSending(true);
+    setIsSupportOpen(true);
+    window.setTimeout(() => setSupportSending(false), 120);
   };
 
   if (loading) {
@@ -445,10 +453,10 @@ export function DashboardPage() {
           )}
         </div>
         <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
-          {supportSending ? 'Отправка...' : 'Связаться с поддержкой'}
+          {supportSending ? 'Открываем чат...' : 'Связаться с поддержкой'}
         </button>
       </section>
-      <SupportChatWidget />
+      <SupportChatWidget open={isSupportOpen} onOpenChange={setIsSupportOpen} hideFab />
     </main>
   );
 }
