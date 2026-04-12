@@ -12,6 +12,8 @@ type Me = {
   avatar_url?: string | null;
   company_name?: string | null;
   company_logo_url?: string | null;
+  subscription_status?: string | null;
+  subscription_label?: string | null;
 };
 
 type BillingMe = {
@@ -210,10 +212,11 @@ export function DashboardPage() {
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const remainingDays = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const normalizedDaysLeft = Math.max(0, remainingDays);
-  const currentPlanTitle = formatPlanLabel(normalizedDaysLeft, billing?.plan_code);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
   const planDaysLeft = `${normalizedDaysLeft} дн.`;
   const hasAccess = billing?.status === 'active' && normalizedDaysLeft > 0;
+  const trialActive = hasAccess && (me?.subscription_status === 'trial_3d' || billing?.plan_code === 'trial_3d');
+  const currentPlanTitle = trialActive ? 'Тест 3 дня' : formatPlanLabel(normalizedDaysLeft);
   const isExpiringSoon = hasAccess && normalizedDaysLeft <= 3;
   const isExpired = !hasAccess;
 
