@@ -123,6 +123,7 @@ export function DashboardPage() {
   const [supportSending, setSupportSending] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [supportUnread, setSupportUnread] = useState(0);
+  const [expiringNoticeDismissed, setExpiringNoticeDismissed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -220,6 +221,12 @@ export function DashboardPage() {
   const isExpiringSoon = hasAccess && normalizedDaysLeft <= 3;
   const isExpired = !hasAccess;
 
+  useEffect(() => {
+    if (!isExpiringSoon) {
+      setExpiringNoticeDismissed(false);
+    }
+  }, [isExpiringSoon]);
+
   const showAccessNotice = (event?: MouseEvent<HTMLElement>, text?: string) => {
     if (accessToast) {
       return;
@@ -288,9 +295,17 @@ export function DashboardPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
-        {isExpiringSoon ? (
-            <div className="status status-warning">
+        {isExpiringSoon && !expiringNoticeDismissed ? (
+            <div className="status status-warning status-dismissible">
             Внимание: подписка заканчивается через {normalizedDaysLeft} дн. Продлите заранее, чтобы не потерять доступ.
+            <button
+              type="button"
+              className="status-dismiss"
+              onClick={() => setExpiringNoticeDismissed(true)}
+              aria-label="Закрыть предупреждение"
+            >
+              ✕
+            </button>
           </div>
         ) : null}
         {isExpired ? (

@@ -290,6 +290,28 @@ p {
   font-size: 0.95rem;
 }
 
+.status-dismissible {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .status-error {
   background: var(--surface-danger);
   border: 1px solid var(--text-danger);
