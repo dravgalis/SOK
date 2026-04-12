@@ -39,6 +39,7 @@ class AdminLoginRequest(BaseModel):
 class AdminSubscriptionUpdateRequest(BaseModel):
     period_type: str
     period_ends_on: str | None = None
+    trial_3d_granted: bool | None = None
 
 
 class AdminSupportReplyRequest(BaseModel):
@@ -133,10 +134,12 @@ async def admin_update_user_subscription(
 ) -> dict[str, str | None]:
     _require_admin_token(authorization)
 
-    allowed_period_types = {'trial_3d', 'paid_1m', 'paid_6m', 'paid_1y'}
+    allowed_period_types = {'inactive', 'trial_3d', 'paid_1m', 'paid_6m', 'paid_1y'}
     period_type = payload.period_type.strip()
     if period_type not in allowed_period_types:
         raise HTTPException(status_code=400, detail='Invalid period type.')
+
+    subscription_status = None if period_type == 'inactive' else period_type
 
     period_ends_at: str | None = None
     if payload.period_ends_on:
@@ -150,8 +153,9 @@ async def admin_update_user_subscription(
 
     updated = update_user_subscription(
         hh_id=hh_id,
-        subscription_status=period_type,
+        subscription_status=subscription_status,
         subscription_expires_at=period_ends_at,
+        trial_3d_granted=payload.trial_3d_granted,
     )
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
@@ -167,7 +171,7 @@ async def admin_update_user_subscription(
     billing_status = 'active' if expires_at_dt and expires_at_dt > now else 'inactive'
     update_user_billing(
         hh_id=hh_id,
-        plan_code=plan_code_map.get(period_type),
+        plan_code=plan_code_map.get(subscription_status or ''),
         status=billing_status,
         current_period_end=period_ends_at,
         sync_legacy_subscription=False,
@@ -175,8 +179,9 @@ async def admin_update_user_subscription(
 
     return {
         'hh_id': hh_id,
-        'subscription_status': period_type,
+        'subscription_status': subscription_status,
         'subscription_expires_at': period_ends_at,
+        'trial_3d_granted': payload.trial_3d_granted,
     }
 
 
