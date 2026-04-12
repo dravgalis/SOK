@@ -216,12 +216,12 @@ export function DashboardPage() {
   const isExpiringSoon = hasAccess && remainingDays <= 3;
   const isExpired = !hasAccess;
 
-  const showAccessNotice = (event?: MouseEvent<HTMLElement>) => {
+  const showAccessNotice = (event?: MouseEvent<HTMLElement>, text?: string) => {
     if (accessToast) {
       return;
     }
     setAccessToast({
-      text: 'Оплатите подписку, чтобы открыть этот раздел.',
+      text: text || 'Оплатите подписку, чтобы открыть этот раздел.',
       x: event?.clientX ?? Math.max(180, window.innerWidth - 260),
       y: event?.clientY ?? 24,
     });
@@ -266,7 +266,9 @@ export function DashboardPage() {
     });
     if (!response.ok) {
       setIsAutoPayEnabled(!nextValue);
-      throw new Error('Не удалось обновить автоплатеж.');
+      const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+      showAccessNotice(undefined, payload.detail || 'Не удалось обновить автоплатеж.');
+      return;
     }
     setBilling((current) => ({ ...(current || {}), auto_renew_enabled: nextValue }));
   };

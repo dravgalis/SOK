@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import ceil
 from calendar import monthrange
 from typing import Literal
@@ -304,6 +304,13 @@ async def my_billing(request: Request) -> dict[str, object]:
 @router.patch('/auto-renew')
 async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
     hh_id = await _require_hh_id(request)
+    billing = get_user_billing(hh_id) or {}
+    payment_method_id = billing.get('payment_method_id')
+    if payload.enabled and (not isinstance(payment_method_id, str) or not payment_method_id):
+        raise HTTPException(
+            status_code=400,
+            detail='Автоплатеж недоступен: сначала выполните хотя бы одну успешную оплату подписки.',
+        )
     updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=payload.enabled, sync_legacy_subscription=False)
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
@@ -312,7 +319,8 @@ async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict
 
 async def process_recurring_payments() -> None:
     now = datetime.now(timezone.utc)
-    users = get_users_for_recurring(now.isoformat())
+    pending_cutoff = now.replace(microsecond=0) - timedelta(minutes=30)
+    users = get_users_for_recurring(now.isoformat(), pending_cutoff.isoformat())
     service = YooKassaService()
     for user in users:
         hh_id = str(user.get('hh_id', '')).strip()
