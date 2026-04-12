@@ -443,6 +443,9 @@ export function DashboardPage() {
             </ul>
           )}
         </div>
+        <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
+          {supportSending ? 'Отправка...' : 'Связаться с поддержкой'}
+        </button>
       </section>
       <SupportChatWidget />
     </main>
