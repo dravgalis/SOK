@@ -60,11 +60,7 @@ THEME_STORE: dict[str, dict[str, object]] = {
     'beige': {'label': 'Бежевая', 'price': 0.0, 'paid': False, 'rarity': 'Обычная'},
     'mint': {'label': 'Мятная', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
     'lavender': {'label': 'Лавандовая', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
-    'sunset': {'label': 'Закат', 'price': 50.0, 'paid': True, 'rarity': 'Необычная'},
-    'aurora': {'label': 'Северное сияние', 'price': 150.0, 'paid': True, 'rarity': 'Редкая'},
     'neon': {'label': 'Неон', 'price': 750.0, 'paid': True, 'rarity': 'Эпическая'},
-    'golden-sakura': {'label': 'Золотая сакура', 'price': 1500.0, 'paid': True, 'rarity': 'Легендарная'},
-    'mythic-pop': {'label': 'Mythic Pop', 'price': 3000.0, 'paid': True, 'rarity': 'Мифическая'},
 }
 
 

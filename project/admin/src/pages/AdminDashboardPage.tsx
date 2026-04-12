@@ -58,6 +58,7 @@ export function AdminDashboardPage() {
   const [savingByUser, setSavingByUser] = useState<Record<string, boolean>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [unreadSupportCount, setUnreadSupportCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const toDateInputValue = (value: string | null): string => {
     if (!value) return '';
@@ -155,6 +156,17 @@ export function AdminDashboardPage() {
     }));
   };
 
+
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const filteredUsers = users.filter((user) => {
+    if (!normalizedSearch) return true;
+    return [user.hh_id, user.name, user.company_name ?? '']
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedSearch);
+  });
+
   const handleSaveSubscription = async (hhId: string) => {
     const token = window.localStorage.getItem(ADMIN_STORAGE_KEY);
     if (!token) {
@@ -237,6 +249,16 @@ export function AdminDashboardPage() {
             </button>
           </div>
         </div>
+        <div className="tableHeaderRow" style={{ marginTop: 12 }}>
+          <p>Найдено: {filteredUsers.length}</p>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Поиск по ID, имени или компании"
+            aria-label="Поиск пользователей"
+          />
+        </div>
         <div className="tableWrapper">
           <table>
             <thead>
@@ -253,7 +275,7 @@ export function AdminDashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
+              {filteredUsers.map((user) => (
                 <tr key={user.hh_id}>
                   <td>{user.company_name ?? '—'}</td>
                   <td>{user.name}</td>
