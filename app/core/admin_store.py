@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,6 +114,21 @@ def init_users_table() -> None:
                 '''
             )
         )
+        connection.execute(
+            text(
+                '''
+                CREATE TABLE IF NOT EXISTS support_messages (
+                    message_id TEXT PRIMARY KEY,
+                    hh_id TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    sender_role TEXT NOT NULL DEFAULT 'user',
+                    read_by_admin INTEGER NOT NULL DEFAULT 0,
+                    read_by_user INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                '''
+            )
+        )
         _ensure_column(connection, 'users', 'company_name', 'TEXT')
         _ensure_column(connection, 'users', 'vacancies_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
@@ -135,6 +151,10 @@ def init_users_table() -> None:
         _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
         _ensure_column(connection, 'billing_payments', 'product_type', "TEXT NOT NULL DEFAULT 'subscription'")
         _ensure_column(connection, 'billing_payments', 'theme_code', 'TEXT')
+        _ensure_column(connection, 'support_messages', 'sender_role', "TEXT NOT NULL DEFAULT 'user'")
+        _ensure_column(connection, 'support_messages', 'read_by_admin', 'INTEGER NOT NULL DEFAULT 0')
+        _ensure_column(connection, 'support_messages', 'read_by_user', 'INTEGER NOT NULL DEFAULT 0')
+        connection.execute(text('UPDATE users SET auto_renew_enabled = 0 WHERE auto_renew_enabled != 0'))
 
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
@@ -253,6 +273,119 @@ def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count
                 'hh_id': hh_id,
             },
         )
+
+
+def add_support_message(*, hh_id: str, message: str, sender_role: str = 'user') -> str:
+    message_id = str(uuid.uuid4())
+    is_admin = sender_role == 'admin'
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text(
+                '''
+                INSERT INTO support_messages (message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at)
+                VALUES (:message_id, :hh_id, :message, :sender_role, :read_by_admin, :read_by_user, :created_at)
+                '''
+            ),
+            {
+                'message_id': message_id,
+                'hh_id': hh_id,
+                'message': message,
+                'sender_role': 'admin' if is_admin else 'user',
+                'read_by_admin': 1 if is_admin else 0,
+                'read_by_user': 0 if is_admin else 1,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    return message_id
+
+
+def get_support_messages(limit: int = 200) -> list[dict[str, str]]:
+    normalized_limit = max(1, min(limit, 1000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT message_id, hh_id, message, created_at
+                FROM support_messages
+                ORDER BY created_at DESC
+                LIMIT :limit
+                '''
+            ),
+            {'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def get_support_chats(limit: int = 500) -> list[dict[str, object]]:
+    normalized_limit = max(1, min(limit, 2000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT
+                    hh_id,
+                    MAX(created_at) AS last_message_at,
+                    SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) AS unread_by_admin,
+                    SUM(CASE WHEN sender_role = 'admin' AND read_by_user = 0 THEN 1 ELSE 0 END) AS unread_by_user
+                FROM support_messages
+                GROUP BY hh_id
+                ORDER BY
+                    CASE WHEN SUM(CASE WHEN sender_role = 'user' AND read_by_admin = 0 THEN 1 ELSE 0 END) > 0 THEN 0 ELSE 1 END,
+                    MAX(created_at) DESC
+                LIMIT :limit
+                '''
+            ),
+            {'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def get_support_chat_messages(hh_id: str, limit: int = 300) -> list[dict[str, object]]:
+    normalized_limit = max(1, min(limit, 1000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at
+                FROM support_messages
+                WHERE hh_id = :hh_id
+                ORDER BY created_at ASC
+                LIMIT :limit
+                '''
+            ),
+            {'hh_id': hh_id, 'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
+
+
+def mark_support_messages_read_by_admin(hh_id: str) -> int:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE support_messages
+                SET read_by_admin = 1
+                WHERE hh_id = :hh_id AND sender_role = 'user' AND read_by_admin = 0
+                '''
+            ),
+            {'hh_id': hh_id},
+        )
+        return int(result.rowcount or 0)
+
+
+def mark_support_messages_read_by_user(hh_id: str) -> int:
+    with ENGINE.begin() as connection:
+        result = connection.execute(
+            text(
+                '''
+                UPDATE support_messages
+                SET read_by_user = 1
+                WHERE hh_id = :hh_id AND sender_role = 'admin' AND read_by_user = 0
+                '''
+            ),
+            {'hh_id': hh_id},
+        )
+        return int(result.rowcount or 0)
 
 
 def get_user_access_token(hh_id: str) -> str | None:
@@ -547,7 +680,7 @@ def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
         return result.rowcount > 0
 
 
-def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
+def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[str, str]]:
     with ENGINE.connect() as connection:
         rows = connection.execute(
             text(
@@ -556,11 +689,21 @@ def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
                 FROM users
                 WHERE auto_renew_enabled = 1
                   AND payment_method_id IS NOT NULL
-                  AND current_period_end IS NOT NULL
-                  AND current_period_end <= :now_iso
+                  AND (
+                      (current_period_end IS NOT NULL AND current_period_end <= :now_iso)
+                      OR billing_status IN ('inactive', 'past_due', 'canceled')
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM billing_payments bp
+                      WHERE bp.hh_id = users.hh_id
+                        AND bp.product_type = 'subscription'
+                        AND bp.status = 'pending'
+                        AND bp.created_at >= :pending_cutoff_iso
+                  )
                 '''
             ),
-            {'now_iso': now_iso},
+            {'now_iso': now_iso, 'pending_cutoff_iso': pending_cutoff_iso},
         ).mappings()
         return [dict(row) for row in rows]
 

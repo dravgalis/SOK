@@ -92,50 +92,50 @@ export function ThemeSettingsPage() {
     }
   };
 
-  const previewThemeItem = themes.find((item) => item.code === previewTheme);
-  const previewLocked = Boolean(previewThemeItem?.paid && !previewThemeItem?.unlocked);
-
   return (
     <main className="page page-top">
       <section className="card dashboard-card">
+        <div className="page-top-link-row">
+          <Link to={APP_ROUTES.app} className="back-link-button">
+            ← Назад в кабинет
+          </Link>
+        </div>
         <h2>Выбор темы</h2>
         <p>Нажмите на вариант темы:</p>
         {loading ? <p>Загрузка тем...</p> : null}
         {error ? <p className="status status-error">{error}</p> : null}
         <div className="theme-grid">
           {themes.map((themeOption) => (
-            <button
-              key={themeOption.code}
-              type="button"
-              className={`theme-swatch ${previewTheme === themeOption.code ? 'theme-swatch-active' : ''}`}
-              onClick={() => void handleSelectTheme(themeOption)}
-              aria-label={themeOption.label}
-              title={themeOption.label}
-            >
-              <span className={`theme-swatch-preview ${PREVIEW_CLASS[themeOption.code] || PREVIEW_CLASS.default}`} />
-              <span className="theme-swatch-label">{themeOption.label}</span>
-              <span className="theme-swatch-price">
-                {themeOption.rarity} {themeOption.paid ? `· ${themeOption.price} ₽` : '· бесплатно'}
-                {themeOption.paid && !themeOption.unlocked ? ' · Предпросмотр' : ''}
-              </span>
-            </button>
+            <div key={themeOption.code} className="theme-swatch-item">
+              <button
+                type="button"
+                className={`theme-swatch ${previewTheme === themeOption.code ? 'theme-swatch-active' : ''}`}
+                onClick={() => void handleSelectTheme(themeOption)}
+                aria-label={themeOption.label}
+                title={themeOption.label}
+              >
+                <span className={`theme-swatch-preview ${PREVIEW_CLASS[themeOption.code] || PREVIEW_CLASS.default}`} />
+                <span className="theme-swatch-label">{themeOption.label}</span>
+                <span className="theme-swatch-price">
+                  {themeOption.rarity} {themeOption.paid ? `· ${themeOption.price} ₽` : '· бесплатно'}
+                  {themeOption.paid && !themeOption.unlocked ? ' · Предпросмотр' : ''}
+                </span>
+              </button>
+              {previewTheme === themeOption.code && themeOption.paid && !themeOption.unlocked ? (
+                <div className="theme-paywall theme-paywall-inline">
+                  <strong>Тема в режиме предпросмотра</strong>
+                  <p>Чтобы пользоваться постоянно — приобретите её.</p>
+                  <button
+                    type="button"
+                    className="settings-secondary-button"
+                    onClick={() => void handlePurchaseTheme(themeOption.code)}
+                  >
+                    Приобрести тему за {themeOption.price} ₽
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ))}
-        </div>
-        {previewLocked ? (
-          <div className="theme-paywall">
-            <strong>Тема в режиме предпросмотра</strong>
-            <p>После обновления страницы премиум-тема будет закрыта. Чтобы пользоваться постоянно — приобретите её.</p>
-            <button
-              type="button"
-              className="settings-secondary-button"
-              onClick={() => void handlePurchaseTheme(previewTheme)}
-            >
-              Приобрести тему за {previewThemeItem?.price ?? 50} ₽
-            </button>
-          </div>
-        ) : null}
-        <div style={{ marginTop: 16 }}>
-          <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
         </div>
       </section>
     </main>

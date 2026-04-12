@@ -8,15 +8,21 @@ from pydantic import BaseModel
 
 from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
 from ..core.admin_store import (
+    add_support_message,
     get_all_users,
     get_cached_user_vacancies,
     get_cached_vacancy_responses,
     get_billing_operations,
     get_user_access_token,
     get_users_with_tokens,
+    get_support_messages,
+    get_support_chats,
+    get_support_chat_messages,
     replace_user_vacancies,
     replace_vacancy_responses,
+    mark_support_messages_read_by_admin,
     update_user_subscription,
+    update_user_billing,
     update_user_metrics,
 )
 
@@ -32,6 +38,10 @@ class AdminLoginRequest(BaseModel):
 class AdminSubscriptionUpdateRequest(BaseModel):
     period_type: str
     period_ends_on: str | None = None
+
+
+class AdminSupportReplyRequest(BaseModel):
+    message: str
 
 
 def _admin_token() -> str:
@@ -71,6 +81,46 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
     return get_all_users()
 
 
+@router.get('/support-messages')
+async def admin_support_messages(authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'messages': get_support_messages()}
+
+
+@router.get('/support-chats')
+async def admin_support_chats(authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'chats': get_support_chats()}
+
+
+@router.get('/support-chats/{hh_id}')
+async def admin_support_chat_messages(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    messages = get_support_chat_messages(hh_id)
+    return {'hh_id': hh_id, 'messages': messages}
+
+
+@router.post('/support-chats/{hh_id}/read')
+async def admin_mark_support_read(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, int]:
+    _require_admin_token(authorization)
+    updated = mark_support_messages_read_by_admin(hh_id)
+    return {'updated': updated}
+
+
+@router.post('/support-chats/{hh_id}/reply')
+async def admin_reply_support(
+    hh_id: str,
+    payload: AdminSupportReplyRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_admin_token(authorization)
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
+    message_id = add_support_message(hh_id=hh_id, message=message, sender_role='admin')
+    return {'message_id': message_id}
+
+
 @router.patch('/users/{hh_id}/subscription')
 async def admin_update_user_subscription(
     hh_id: str,
@@ -101,6 +151,23 @@ async def admin_update_user_subscription(
     )
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
+
+    plan_code_map = {
+        'trial_3d': 'trial_3d',
+        'paid_1m': '1_month',
+        'paid_6m': '6_months',
+        'paid_1y': '12_months',
+    }
+    now = datetime.now(timezone.utc)
+    expires_at_dt = datetime.fromisoformat(period_ends_at) if period_ends_at else None
+    billing_status = 'active' if expires_at_dt and expires_at_dt > now else 'inactive'
+    update_user_billing(
+        hh_id=hh_id,
+        plan_code=plan_code_map.get(period_type),
+        status=billing_status,
+        current_period_end=period_ends_at,
+        sync_legacy_subscription=False,
+    )
 
     return {
         'hh_id': hh_id,

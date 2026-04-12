@@ -50,6 +50,11 @@ export function AdminUserOperationsPage() {
   return (
     <main className="page">
       <section className="card">
+        <div className="tableHeaderRow">
+          <Link to={ADMIN_ROUTES.dashboard} className="back-link-button">
+            ← Назад в админку
+          </Link>
+        </div>
         <h1>Операции пользователя</h1>
         <p>HH ID: {hhId}</p>
         {loading ? <p>Загрузка...</p> : null}
@@ -85,9 +90,6 @@ export function AdminUserOperationsPage() {
               ))}
             </tbody>
           </table>
-        </div>
-        <div style={{ marginTop: 16 }}>
-          <Link to={ADMIN_ROUTES.dashboard}>← Назад в админку</Link>
         </div>
       </section>
     </main>
