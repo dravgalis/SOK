@@ -245,7 +245,7 @@ def get_all_users() -> list[dict[str, str | int | None]]:
                     plan_code, current_period_end, billing_status, selected_interface,
                     created_at, last_login
                 FROM users
-                ORDER BY last_login DESC
+                ORDER BY created_at DESC, last_login DESC
                 '''
             )
         ).mappings()

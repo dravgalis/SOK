@@ -19,11 +19,7 @@ const PREVIEW_CLASS: Record<ThemeKey, string> = {
   beige: 'theme-preview-beige',
   mint: 'theme-preview-mint',
   lavender: 'theme-preview-lavender',
-  sunset: 'theme-preview-sunset',
-  aurora: 'theme-preview-aurora',
   neon: 'theme-preview-neon',
-  'golden-sakura': 'theme-preview-golden-sakura',
-  'mythic-pop': 'theme-preview-mythic-pop',
 };
 
 export function ThemeSettingsPage() {
