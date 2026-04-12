@@ -206,11 +206,12 @@ export function DashboardPage() {
 
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const remainingDays = typeof billing?.days_left === 'number' ? billing.days_left : 0;
-  const currentPlanTitle = formatPlanLabel(remainingDays);
+  const normalizedDaysLeft = Math.max(0, remainingDays);
+  const currentPlanTitle = formatPlanLabel(normalizedDaysLeft);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
-  const planDaysLeft = `${remainingDays} дн.`;
-  const hasAccess = billing?.status === 'active' && remainingDays > 0;
-  const isExpiringSoon = hasAccess && remainingDays <= 3;
+  const planDaysLeft = `${normalizedDaysLeft} дн.`;
+  const hasAccess = billing?.status === 'active' && normalizedDaysLeft > 0;
+  const isExpiringSoon = hasAccess && normalizedDaysLeft <= 3;
   const isExpired = !hasAccess;
 
   const showAccessNotice = (event?: MouseEvent<HTMLElement>, text?: string) => {
@@ -277,7 +278,7 @@ export function DashboardPage() {
       <section className="card dashboard-card dashboard-wide">
         {isExpiringSoon ? (
             <div className="status status-warning">
-            Внимание: подписка заканчивается через {remainingDays} дн. Продлите заранее, чтобы не потерять доступ.
+            Внимание: подписка заканчивается через {normalizedDaysLeft} дн. Продлите заранее, чтобы не потерять доступ.
           </div>
         ) : null}
         {isExpired ? (
