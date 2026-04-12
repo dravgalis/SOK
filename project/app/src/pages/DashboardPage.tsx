@@ -149,17 +149,7 @@ export function DashboardPage() {
 
         const mePayload = (await meResponse.json()) as Me;
         const billingPayload = (await billingResponse.json()) as BillingMe;
-        let vacanciesPayload: VacanciesPayload = {
-          active: [],
-          archived: [],
-          counts: { active: 0, archived: 0 },
-        };
-
-        if (vacanciesResponse.ok) {
-          vacanciesPayload = normalizeVacanciesPayload(await vacanciesResponse.json());
-        } else if (!(await shouldTreatVacanciesAsEmpty(vacanciesResponse))) {
-          throw new Error('Не удалось загрузить вакансии.');
-        }
+        const vacanciesPayload = await resolveVacanciesPayload(vacanciesResponse);
 
         setMe(mePayload);
         setBilling(billingPayload);
@@ -570,6 +560,22 @@ async function shouldTreatVacanciesAsEmpty(response: Response): Promise<boolean>
   } catch {
     return false;
   }
+}
+
+async function resolveVacanciesPayload(response: Response): Promise<VacanciesPayload> {
+  if (response.ok) {
+    return normalizeVacanciesPayload(await response.json());
+  }
+
+  if (await shouldTreatVacanciesAsEmpty(response)) {
+    return {
+      active: [],
+      archived: [],
+      counts: { active: 0, archived: 0 },
+    };
+  }
+
+  throw new Error('Не удалось загрузить вакансии.');
 }
 
 function formatPlanLabel(daysLeft: number, planCode?: string | null): string {

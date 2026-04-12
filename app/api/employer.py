@@ -425,9 +425,9 @@ async def _fetch_paginated_vacancies(
             payload = await _hh_get(client, endpoint, access_token=access_token, params=params)
         except HTTPException as exc:
             logger.warning('HH vacancies debug: endpoint=%s failed status=%s', endpoint, exc.status_code)
-            if page == 0:
+            if page == 0 and _is_no_vacancies_error(exc):
                 return []
-            break
+            raise
 
         items = payload.get('items')
         if isinstance(items, list):
@@ -445,6 +445,18 @@ async def _fetch_paginated_vacancies(
             break
 
     return all_items
+
+
+def _is_no_vacancies_error(exc: HTTPException) -> bool:
+    if exc.status_code in (404, 422):
+        return True
+
+    detail = str(exc.detail).lower() if exc.detail is not None else ''
+    if not detail:
+        return False
+
+    no_data_markers = ('ваканс', 'vacanc', 'not found', 'не найден')
+    return any(marker in detail for marker in no_data_markers)
 
 
 async def _fetch_all_responses(client: httpx.AsyncClient, *, access_token: str, vacancy_id: str) -> dict[str, object]:
