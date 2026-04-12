@@ -296,6 +296,12 @@ p {
   color: var(--text-danger);
 }
 
+.status-warning {
+  background: var(--surface-warning);
+  border: 1px solid var(--text-warning);
+  color: var(--text-warning);
+}
+
 .cta-button {
   width: 100%;
   border: 0;
@@ -481,6 +487,11 @@ p {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
   color: #ffffff;
+}
+
+.settings-button-disabled {
+  opacity: 0.6;
+  cursor: not-allowed !important;
 }
 
 .operation-badge {
