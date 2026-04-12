@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { MouseEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { APP_ENDPOINTS, APP_ROUTES } from '../config';
 import { ThemeKey, applyTheme, readTheme } from '../theme';
@@ -117,6 +117,7 @@ export function DashboardPage() {
   const [isAutoPayEnabled, setIsAutoPayEnabled] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<PlanCode>('1_month');
+  const [accessNotice, setAccessNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -208,7 +209,24 @@ export function DashboardPage() {
   const selectedVacancies = useMemo(() => vacanciesByTab[activeTab] || [], [activeTab, vacanciesByTab]);
   const currentPlanTitle = formatPlanLabel(billing?.plan_code);
   const planEndDate = formatPlanEndDate(billing?.current_period_end);
+  const daysLeft = typeof billing?.days_left === 'number' ? billing.days_left : 0;
   const planDaysLeft = typeof billing?.days_left === 'number' ? `${billing.days_left} дн.` : '—';
+  const hasAccess = billing?.status === 'active' && daysLeft > 0;
+  const isExpiringSoon = hasAccess && daysLeft <= 3;
+  const isExpired = !hasAccess;
+
+  const showAccessNotice = () => {
+    if (accessNotice) {
+      return;
+    }
+    setAccessNotice('Подписка неактивна. Пожалуйста, оплатите подписку, чтобы пользоваться сервисом.');
+    window.setTimeout(() => setAccessNotice(''), 5000);
+  };
+
+  const handleBlockedAction = (event: MouseEvent) => {
+    event.preventDefault();
+    showAccessNotice();
+  };
 
   const handleLogout = () => {
     window.location.assign('https://sok-app.onrender.com');
@@ -271,6 +289,18 @@ export function DashboardPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
+        {isExpiringSoon ? (
+          <div className="status status-warning">
+            Внимание: подписка заканчивается через {daysLeft} дн. Продлите заранее, чтобы не потерять доступ.
+          </div>
+        ) : null}
+        {isExpired ? (
+          <div className="status status-error">
+            Подписка закончилась. Пожалуйста, оплатите подписку, чтобы пользоваться сервисом.
+          </div>
+        ) : null}
+        {accessNotice ? <div className="status status-error">{accessNotice}</div> : null}
+
         <div className="profile-header-row">
           <div className="profile-header-company">
             {me?.company_logo_url ? (
@@ -301,7 +331,12 @@ export function DashboardPage() {
                 <section className="settings-section">
                   <h3>Тема</h3>
                   <span className="settings-label">Текущая тема</span>
-                  <Link to={APP_ROUTES.theme} className="settings-secondary-button">
+                  <Link
+                    to={APP_ROUTES.theme}
+                    className={`settings-secondary-button ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                    onClick={!hasAccess ? handleBlockedAction : undefined}
+                    aria-disabled={!hasAccess}
+                  >
                     Выбрать тему
                   </Link>
                 </section>
@@ -346,9 +381,10 @@ export function DashboardPage() {
                     <span>Автоплатеж</span>
                     <button
                       type="button"
-                      className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''}`}
-                      onClick={() => void handleToggleAutoPay()}
+                      className={`toggle-switch ${isAutoPayEnabled ? 'toggle-switch-active' : ''} ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                      onClick={hasAccess ? () => void handleToggleAutoPay() : showAccessNotice}
                       aria-pressed={isAutoPayEnabled}
+                      aria-disabled={!hasAccess}
                     >
                       <span className="toggle-switch-thumb" />
                     </button>
@@ -356,10 +392,20 @@ export function DashboardPage() {
                 </section>
 
                 <section className="settings-section">
-                  <Link to={APP_ROUTES.operations} className="settings-secondary-button">
+                  <Link
+                    to={APP_ROUTES.operations}
+                    className={`settings-secondary-button ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                    onClick={!hasAccess ? handleBlockedAction : undefined}
+                    aria-disabled={!hasAccess}
+                  >
                     Операции
                   </Link>
-                  <button type="button" className="settings-logout-button" onClick={handleLogout}>
+                  <button
+                    type="button"
+                    className={`settings-logout-button ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                    onClick={hasAccess ? handleLogout : showAccessNotice}
+                    aria-disabled={!hasAccess}
+                  >
                     Выйти из аккаунта
                   </button>
                 </section>
@@ -378,8 +424,8 @@ export function DashboardPage() {
                 type="button"
                 role="tab"
                 aria-selected={activeTab === tab.key}
-                className={`vacancy-tab ${activeTab === tab.key ? 'vacancy-tab-active' : ''}`}
-                onClick={() => setActiveTab(tab.key)}
+                className={`vacancy-tab ${activeTab === tab.key ? 'vacancy-tab-active' : ''} ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                onClick={hasAccess ? () => setActiveTab(tab.key) : showAccessNotice}
               >
                 <span>{tab.label}</span>
                 <span className="vacancy-tab-count">{counts[tab.key] ?? 0}</span>
@@ -396,7 +442,12 @@ export function DashboardPage() {
             <ul className="vacancies-list">
               {selectedVacancies.map((vacancy) => (
                 <li key={vacancy.id} className="vacancy-item">
-                  <Link to={`/app/vacancies/${vacancy.id}`} className="vacancy-link">
+                  <Link
+                    to={`/app/vacancies/${vacancy.id}`}
+                    className={`vacancy-link ${!hasAccess ? 'settings-button-disabled' : ''}`}
+                    onClick={!hasAccess ? handleBlockedAction : undefined}
+                    aria-disabled={!hasAccess}
+                  >
                     <strong>{vacancy.name}</strong>
                     <span>
                       {getVacancyMetaLabel(activeTab)}: {getVacancyMetaDate(activeTab, vacancy)}

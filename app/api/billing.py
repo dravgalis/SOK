@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from ..core.admin_store import (
     get_payment,
     get_user_billing,
+    get_user_selected_interface,
     get_billing_operations,
     get_user_unlocked_themes,
     mark_payment_failed,
@@ -234,6 +235,25 @@ async def my_themes(request: Request) -> dict[str, object]:
     return {'themes': themes}
 
 
+@router.get('/selected-theme')
+async def get_selected_theme(request: Request) -> dict[str, str]:
+    hh_id = await _require_hh_id(request)
+    unlocked = get_user_unlocked_themes(hh_id)
+
+    current_selected = get_user_selected_interface(hh_id)
+    selected = current_selected or 'default'
+    theme_info = THEME_STORE.get(selected)
+    if theme_info is None:
+        selected = 'default'
+    elif bool(theme_info.get('paid')) and selected not in unlocked:
+        selected = 'default'
+
+    if current_selected != selected:
+        update_user_selected_interface(hh_id, selected)
+
+    return {'selected_theme': selected}
+
+
 @router.patch('/selected-theme')
 async def set_selected_theme(payload: SelectThemeRequest, request: Request) -> dict[str, str]:
     hh_id = await _require_hh_id(request)
@@ -265,13 +285,19 @@ async def my_billing(request: Request) -> dict[str, object]:
         delta_seconds = (current_period_end - now).total_seconds()
         days_left = max(0, ceil(delta_seconds / 86400))
 
-    status = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    status_raw = billing.get('status') if isinstance(billing.get('status'), str) else 'inactive'
+    if current_period_end and current_period_end > now:
+        status = 'active'
+    else:
+        status = status_raw
+    if status not in ALLOWED_STATUSES:
+        status = 'inactive'
     return {
         'plan_code': billing.get('plan_code'),
         'current_period_end': current_period_end.isoformat() if current_period_end else None,
         'days_left': days_left,
         'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
-        'status': status if status in ALLOWED_STATUSES else 'inactive',
+        'status': status,
     }
 
 
