@@ -9,6 +9,8 @@ export const ADMIN_API = {
     `https://sok-i9cq.onrender.com/admin/users/${hhId}/vacancies/${vacancyId}/responses${force ? '?force=true' : ''}`,
   supportMessages: 'https://sok-i9cq.onrender.com/admin/support-messages',
   supportChats: 'https://sok-i9cq.onrender.com/admin/support-chats',
+  supportEvents: (token: string) =>
+    `https://sok-i9cq.onrender.com/admin/support/events?token=${encodeURIComponent(token)}`,
   supportChatMessages: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}`,
   supportChatRead: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}/read`,
   supportChatReply: (hhId: string) => `https://sok-i9cq.onrender.com/admin/support-chats/${hhId}/reply`,

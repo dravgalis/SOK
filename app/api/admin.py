@@ -1,9 +1,12 @@
 import os
 import re
+import json
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .employer import _extract_employer_id, _extract_manager_id, _fetch_all_responses, _fetch_all_vacancies
@@ -26,6 +29,7 @@ from ..core.admin_store import (
     update_user_billing,
     update_user_metrics,
 )
+from ..core.support_events import support_events_hub
 
 router = APIRouter(prefix='/admin', tags=['admin'])
 SKILLS_MATCH_RE = re.compile(r'Совпало\s+(?P<matched>\d+)\s+из', flags=re.IGNORECASE)
@@ -50,11 +54,14 @@ def _admin_token() -> str:
     return os.getenv('ADMIN_TOKEN', 'admin-secret-token').strip() or 'admin-secret-token'
 
 
-def _require_admin_token(authorization: str | None) -> None:
-    if not authorization or not authorization.startswith('Bearer '):
+def _require_admin_token(authorization: str | None, token_from_query: str | None = None) -> None:
+    token = token_from_query.strip() if isinstance(token_from_query, str) else ''
+    if authorization and authorization.startswith('Bearer '):
+        token = authorization.removeprefix('Bearer ').strip()
+
+    if not token:
         raise HTTPException(status_code=401, detail='Admin authorization required.')
 
-    token = authorization.removeprefix('Bearer ').strip()
     if token != _admin_token():
         raise HTTPException(status_code=401, detail='Invalid admin token.')
 
@@ -124,6 +131,37 @@ async def admin_reply_support(
         raise HTTPException(status_code=400, detail='Сообщение не должно быть пустым.')
     message_id = add_support_message(hh_id=hh_id, message=message, sender_role='admin')
     return {'message_id': message_id}
+
+
+@router.get('/support/events')
+async def admin_support_events(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    token: str | None = Query(default=None),
+) -> StreamingResponse:
+    _require_admin_token(authorization, token_from_query=token)
+
+    async def event_stream():
+        async with support_events_hub.subscribe() as queue:
+            yield ': connected\n\n'
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield f'event: support_message\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n'
+                except asyncio.TimeoutError:
+                    yield ': keep-alive\n\n'
+
+    return StreamingResponse(
+        event_stream(),
+        headers={
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+        },
+        media_type='text/event-stream',
+    )
 
 
 @router.patch('/users/{hh_id}/subscription')
