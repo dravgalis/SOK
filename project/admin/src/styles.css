@@ -115,6 +115,11 @@ td {
   margin: 0;
 }
 
+.tableActionsInline {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .admin-theme-cell {
   display: inline-flex;
   align-items: center;

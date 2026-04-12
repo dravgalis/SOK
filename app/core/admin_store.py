@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,6 +114,18 @@ def init_users_table() -> None:
                 '''
             )
         )
+        connection.execute(
+            text(
+                '''
+                CREATE TABLE IF NOT EXISTS support_messages (
+                    message_id TEXT PRIMARY KEY,
+                    hh_id TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                '''
+            )
+        )
         _ensure_column(connection, 'users', 'company_name', 'TEXT')
         _ensure_column(connection, 'users', 'vacancies_count', 'INTEGER NOT NULL DEFAULT 0')
         _ensure_column(connection, 'users', 'responses_count', 'INTEGER NOT NULL DEFAULT 0')
@@ -135,6 +148,7 @@ def init_users_table() -> None:
         _ensure_column(connection, 'billing_payments', 'failure_reason', 'TEXT')
         _ensure_column(connection, 'billing_payments', 'product_type', "TEXT NOT NULL DEFAULT 'subscription'")
         _ensure_column(connection, 'billing_payments', 'theme_code', 'TEXT')
+        connection.execute(text('UPDATE users SET auto_renew_enabled = 0 WHERE auto_renew_enabled != 0'))
 
 
 def _ensure_column(connection: Connection, table: str, column: str, definition: str) -> None:
@@ -253,6 +267,43 @@ def update_user_metrics(*, hh_id: str, company_name: str | None, vacancies_count
                 'hh_id': hh_id,
             },
         )
+
+
+def add_support_message(*, hh_id: str, message: str) -> str:
+    message_id = str(uuid.uuid4())
+    with ENGINE.begin() as connection:
+        connection.execute(
+            text(
+                '''
+                INSERT INTO support_messages (message_id, hh_id, message, created_at)
+                VALUES (:message_id, :hh_id, :message, :created_at)
+                '''
+            ),
+            {
+                'message_id': message_id,
+                'hh_id': hh_id,
+                'message': message,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    return message_id
+
+
+def get_support_messages(limit: int = 200) -> list[dict[str, str]]:
+    normalized_limit = max(1, min(limit, 1000))
+    with ENGINE.connect() as connection:
+        rows = connection.execute(
+            text(
+                '''
+                SELECT message_id, hh_id, message, created_at
+                FROM support_messages
+                ORDER BY created_at DESC
+                LIMIT :limit
+                '''
+            ),
+            {'limit': normalized_limit},
+        ).mappings()
+        return [dict(row) for row in rows]
 
 
 def get_user_access_token(hh_id: str) -> str | None:
@@ -547,7 +598,7 @@ def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
         return result.rowcount > 0
 
 
-def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
+def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[str, str]]:
     with ENGINE.connect() as connection:
         rows = connection.execute(
             text(
@@ -556,11 +607,21 @@ def get_users_for_recurring(now_iso: str) -> list[dict[str, str]]:
                 FROM users
                 WHERE auto_renew_enabled = 1
                   AND payment_method_id IS NOT NULL
-                  AND current_period_end IS NOT NULL
-                  AND current_period_end <= :now_iso
+                  AND (
+                      (current_period_end IS NOT NULL AND current_period_end <= :now_iso)
+                      OR billing_status IN ('inactive', 'past_due', 'canceled')
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM billing_payments bp
+                      WHERE bp.hh_id = users.hh_id
+                        AND bp.product_type = 'subscription'
+                        AND bp.status = 'pending'
+                        AND bp.created_at >= :pending_cutoff_iso
+                  )
                 '''
             ),
-            {'now_iso': now_iso},
+            {'now_iso': now_iso, 'pending_cutoff_iso': pending_cutoff_iso},
         ).mappings()
         return [dict(row) for row in rows]
 

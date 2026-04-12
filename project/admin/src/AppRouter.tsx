@@ -5,6 +5,7 @@ import { AdminLoginPage } from './pages/AdminLoginPage';
 import { AdminUserOperationsPage } from './pages/AdminUserOperationsPage';
 import { AdminUserDetailsPage } from './pages/AdminUserDetailsPage';
 import { AdminVacancyResponsesPage } from './pages/AdminVacancyResponsesPage';
+import { AdminSupportMessagesPage } from './pages/AdminSupportMessagesPage';
 
 export function AppRouter() {
   return (
@@ -12,6 +13,7 @@ export function AppRouter() {
       <Routes>
         <Route path={ADMIN_ROUTES.login} element={<AdminLoginPage />} />
         <Route path={ADMIN_ROUTES.dashboard} element={<AdminDashboardPage />} />
+        <Route path={ADMIN_ROUTES.support} element={<AdminSupportMessagesPage />} />
         <Route path="/admin/users/:hhId" element={<AdminUserDetailsPage />} />
         <Route path="/admin/users/:hhId/operations" element={<AdminUserOperationsPage />} />
         <Route path="/admin/users/:hhId/vacancies/:vacancyId/responses" element={<AdminVacancyResponsesPage />} />

@@ -14,9 +14,11 @@ from ..core.admin_store import (
     get_billing_operations,
     get_user_access_token,
     get_users_with_tokens,
+    get_support_messages,
     replace_user_vacancies,
     replace_vacancy_responses,
     update_user_subscription,
+    update_user_billing,
     update_user_metrics,
 )
 
@@ -71,6 +73,12 @@ async def admin_users(authorization: str | None = Header(default=None)) -> list[
     return get_all_users()
 
 
+@router.get('/support-messages')
+async def admin_support_messages(authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_admin_token(authorization)
+    return {'messages': get_support_messages()}
+
+
 @router.patch('/users/{hh_id}/subscription')
 async def admin_update_user_subscription(
     hh_id: str,
@@ -101,6 +109,23 @@ async def admin_update_user_subscription(
     )
     if not updated:
         raise HTTPException(status_code=404, detail='User not found.')
+
+    plan_code_map = {
+        'trial_3d': 'trial_3d',
+        'paid_1m': '1_month',
+        'paid_6m': '6_months',
+        'paid_1y': '12_months',
+    }
+    now = datetime.now(timezone.utc)
+    expires_at_dt = datetime.fromisoformat(period_ends_at) if period_ends_at else None
+    billing_status = 'active' if expires_at_dt and expires_at_dt > now else 'inactive'
+    update_user_billing(
+        hh_id=hh_id,
+        plan_code=plan_code_map.get(period_type),
+        status=billing_status,
+        current_period_end=period_ends_at,
+        sync_legacy_subscription=False,
+    )
 
     return {
         'hh_id': hh_id,

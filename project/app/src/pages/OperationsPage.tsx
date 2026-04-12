@@ -24,6 +24,7 @@ export function OperationsPage() {
   const [payload, setPayload] = useState<OperationsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [supportSending, setSupportSending] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -46,6 +47,28 @@ export function OperationsPage() {
 
   const totalOperations = useMemo(() => payload?.operations.length ?? 0, [payload]);
 
+  const handleSupport = async () => {
+    const message = window.prompt('Опишите ваш вопрос для поддержки:');
+    if (!message || !message.trim()) return;
+    try {
+      setSupportSending(true);
+      const response = await fetch(APP_ENDPOINTS.supportMessage, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error('Не удалось отправить сообщение.');
+      }
+      window.alert('Сообщение отправлено в поддержку.');
+    } catch {
+      window.alert('Ошибка отправки в поддержку.');
+    } finally {
+      setSupportSending(false);
+    }
+  };
+
   if (loading) {
     return (
       <main className="page page-top">
@@ -59,6 +82,9 @@ export function OperationsPage() {
   return (
     <main className="page page-top">
       <section className="card dashboard-card dashboard-wide">
+        <div className="page-top-link-row">
+          <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
+        </div>
         <h2>Операции</h2>
         <div className="operations-summary-grid">
           <article className="operations-summary-card">
@@ -96,7 +122,9 @@ export function OperationsPage() {
           ))}
         </ul>
 
-        <Link to={APP_ROUTES.app}>← Назад в кабинет</Link>
+        <button type="button" className="support-fab" onClick={() => void handleSupport()} disabled={supportSending}>
+          {supportSending ? 'Отправка...' : 'Связаться с поддержкой'}
+        </button>
       </section>
     </main>
   );
