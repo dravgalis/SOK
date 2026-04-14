@@ -57,7 +57,6 @@ class YooKassaService:
                 'return_url': f"{self.frontend_payment_url.rstrip('/')}/payment-return",
             },
             'description': f'SOK subscription {plan_code}',
-            'save_payment_method': True,
             'metadata': {'hh_id': hh_id, 'plan_code': plan_code},
         }
         response_data = await self._post_payment(payload)
@@ -67,24 +66,6 @@ class YooKassaService:
         if not isinstance(confirmation_url, str) or not isinstance(payment_id, str):
             raise YooKassaServiceError('Invalid response from YooKassa.')
         return {'confirmation_url': confirmation_url, 'payment_id': payment_id, 'amount': amount, 'currency': self.currency}
-
-    async def create_recurring_payment(self, *, plan_code: str, hh_id: str, payment_method_id: str) -> dict[str, str]:
-        if not self.shop_id or not self.secret_key:
-            raise YooKassaServiceError('YooKassa credentials are not configured.')
-
-        amount = self.plan_price(plan_code)
-        payload = {
-            'amount': {'value': amount, 'currency': self.currency},
-            'payment_method_id': payment_method_id,
-            'capture': True,
-            'description': f'SOK recurring subscription {plan_code}',
-            'metadata': {'hh_id': hh_id, 'plan_code': plan_code, 'recurring': '1'},
-        }
-        response_data = await self._post_payment(payload)
-        payment_id = response_data.get('id')
-        if not isinstance(payment_id, str):
-            raise YooKassaServiceError('Invalid recurring payment response from YooKassa.')
-        return {'payment_id': payment_id, 'amount': amount, 'currency': self.currency}
 
     async def create_theme_payment(self, *, theme_code: str, hh_id: str, amount: float) -> dict[str, str]:
         if not self.shop_id or not self.secret_key:
