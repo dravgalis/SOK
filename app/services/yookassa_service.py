@@ -11,6 +11,7 @@ PLANS: dict[str, dict[str, str | int]] = {
     '1_month': {'amount': '399.00', 'months': 1},
     '6_months': {'amount': '2150.00', 'months': 6},
     '12_months': {'amount': '3799.00', 'months': 12},
+    'test_month': {'amount': '1.00', 'months': 1},
 }
 
 
