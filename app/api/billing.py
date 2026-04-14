@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from math import ceil
 from calendar import monthrange
 from typing import Literal
@@ -23,7 +23,6 @@ from ..core.admin_store import (
     unlock_theme_for_user,
     update_user_selected_interface,
     update_user_billing,
-    get_users_for_recurring,
     purge_old_support_chats,
 )
 from ..core.support_events import support_events_hub
@@ -36,10 +35,6 @@ ALLOWED_STATUSES = {'active', 'inactive', 'past_due', 'canceled'}
 
 class CreatePaymentRequest(BaseModel):
     plan_code: Literal['1_month', '6_months', '12_months']
-
-
-class AutoRenewRequest(BaseModel):
-    enabled: bool
 
 
 class CreateThemePaymentRequest(BaseModel):
@@ -158,13 +153,6 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
     now = datetime.now(timezone.utc)
     duration = _months_for_plan(plan_code)
     current_end = _parse_iso(current.get('current_period_end') if isinstance(current, dict) else None)
-    payment_method = obj.get('payment_method') if isinstance(obj.get('payment_method'), dict) else {}
-    payment_method_id: str | None = None
-    if payment_method and payment_method.get('saved'):
-        method_id_raw = payment_method.get('id')
-        if isinstance(method_id_raw, str) and method_id_raw:
-            payment_method_id = method_id_raw
-
     if current_end and now < current_end:
         extended_end = _add_calendar_months(current_end, duration)
     else:
@@ -179,7 +167,6 @@ async def yookassa_webhook(payload: dict[str, object]) -> dict[str, bool]:
         currency=payment_row['currency'],
         status='active',
         current_period_end=next_period_end,
-        payment_method_id=payment_method_id if payment_method_id else current.get('payment_method_id'),
         last_payment_id=payment_id,
         last_payment_at=now.isoformat(),
     )
@@ -349,48 +336,9 @@ async def my_billing(request: Request) -> dict[str, object]:
         'plan_code': plan_code,
         'current_period_end': current_period_end.isoformat() if current_period_end else None,
         'days_left': days_left,
-        'auto_renew_enabled': bool(billing.get('auto_renew_enabled')),
+        'auto_renew_enabled': False,
         'status': status,
     }
-
-
-@router.patch('/auto-renew')
-async def toggle_auto_renew(payload: AutoRenewRequest, request: Request) -> dict[str, bool]:
-    hh_id = await _require_hh_id(request)
-    if payload.enabled:
-        raise HTTPException(status_code=400, detail='Автосписание временно отключено.')
-    updated = update_user_billing(hh_id=hh_id, auto_renew_enabled=False, sync_legacy_subscription=False)
-    if not updated:
-        raise HTTPException(status_code=404, detail='User not found.')
-    return {'auto_renew_enabled': False}
-
-
-async def process_recurring_payments() -> None:
-    now = datetime.now(timezone.utc)
-    pending_cutoff = now.replace(microsecond=0) - timedelta(minutes=30)
-    users = get_users_for_recurring(now.isoformat(), pending_cutoff.isoformat())
-    service = YooKassaService()
-    for user in users:
-        hh_id = str(user.get('hh_id', '')).strip()
-        plan_code = '1_month'
-        payment_method_id = str(user.get('payment_method_id', '')).strip()
-        if not hh_id or not plan_code or not payment_method_id:
-            continue
-        try:
-            payment = await service.create_recurring_payment(
-                plan_code=plan_code,
-                hh_id=hh_id,
-                payment_method_id=payment_method_id,
-            )
-            record_payment(
-                payment_id=payment['payment_id'],
-                hh_id=hh_id,
-                plan_code=plan_code,
-                amount=payment['amount'],
-                currency=payment['currency'],
-            )
-        except YooKassaServiceError:
-            update_user_billing(hh_id=hh_id, status='past_due', sync_legacy_subscription=False)
 
 
 async def _require_hh_id(request: Request) -> str:
