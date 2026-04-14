@@ -452,6 +452,23 @@ def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     return status_value, expires_value
 
 
+def get_user_email(hh_id: str) -> str | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text('SELECT email FROM users WHERE hh_id = :hh_id'),
+            {'hh_id': hh_id},
+        ).first()
+
+    if row is None:
+        return None
+
+    email_raw = row[0]
+    if not isinstance(email_raw, str):
+        return None
+    email = email_raw.strip()
+    return email or None
+
+
 def get_user_trial_3d_granted(hh_id: str) -> bool | None:
     with ENGINE.connect() as connection:
         row = connection.execute(
@@ -475,9 +492,7 @@ def get_user_billing(hh_id: str) -> dict[str, str | bool | None] | None:
                     billing_amount,
                     billing_currency,
                     billing_status,
-                    auto_renew_enabled,
                     current_period_end,
-                    payment_method_id,
                     last_payment_id,
                     last_payment_at
                 FROM users
@@ -495,11 +510,9 @@ def get_user_billing(hh_id: str) -> dict[str, str | bool | None] | None:
         'amount': row[1] if isinstance(row[1], str) and row[1] else None,
         'currency': row[2] if isinstance(row[2], str) and row[2] else None,
         'status': row[3] if isinstance(row[3], str) and row[3] else 'inactive',
-        'auto_renew_enabled': bool(row[4]),
-        'current_period_end': row[5] if isinstance(row[5], str) and row[5] else None,
-        'payment_method_id': row[6] if isinstance(row[6], str) and row[6] else None,
-        'last_payment_id': row[7] if isinstance(row[7], str) and row[7] else None,
-        'last_payment_at': row[8] if isinstance(row[8], str) and row[8] else None,
+        'current_period_end': row[4] if isinstance(row[4], str) and row[4] else None,
+        'last_payment_id': row[5] if isinstance(row[5], str) and row[5] else None,
+        'last_payment_at': row[6] if isinstance(row[6], str) and row[6] else None,
     }
 
 
@@ -510,9 +523,7 @@ def update_user_billing(
     amount: str | None = None,
     currency: str | None = None,
     status: str | None = None,
-    auto_renew_enabled: bool | None = None,
     current_period_end: str | None = None,
-    payment_method_id: str | None = None,
     last_payment_id: str | None = None,
     last_payment_at: str | None = None,
     sync_legacy_subscription: bool = True,
@@ -532,15 +543,9 @@ def update_user_billing(
     if status is not None:
         set_parts.append('billing_status = :billing_status')
         params['billing_status'] = status
-    if auto_renew_enabled is not None:
-        set_parts.append('auto_renew_enabled = :auto_renew_enabled')
-        params['auto_renew_enabled'] = 1 if auto_renew_enabled else 0
     if current_period_end is not None:
         set_parts.append('current_period_end = :current_period_end')
         params['current_period_end'] = current_period_end
-    if payment_method_id is not None:
-        set_parts.append('payment_method_id = :payment_method_id')
-        params['payment_method_id'] = payment_method_id
     if last_payment_id is not None:
         set_parts.append('last_payment_id = :last_payment_id')
         params['last_payment_id'] = last_payment_id
@@ -720,34 +725,6 @@ def update_user_selected_interface(hh_id: str, selected_interface: str) -> bool:
             {'selected_interface': selected_interface, 'hh_id': hh_id},
         )
         return result.rowcount > 0
-
-
-def get_users_for_recurring(now_iso: str, pending_cutoff_iso: str) -> list[dict[str, str]]:
-    with ENGINE.connect() as connection:
-        rows = connection.execute(
-            text(
-                '''
-                SELECT hh_id, plan_code, billing_amount, billing_currency, payment_method_id, current_period_end
-                FROM users
-                WHERE auto_renew_enabled = 1
-                  AND payment_method_id IS NOT NULL
-                  AND (
-                      (current_period_end IS NOT NULL AND current_period_end <= :now_iso)
-                      OR billing_status IN ('inactive', 'past_due', 'canceled')
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM billing_payments bp
-                      WHERE bp.hh_id = users.hh_id
-                        AND bp.product_type = 'subscription'
-                        AND bp.status = 'pending'
-                        AND bp.created_at >= :pending_cutoff_iso
-                  )
-                '''
-            ),
-            {'now_iso': now_iso, 'pending_cutoff_iso': pending_cutoff_iso},
-        ).mappings()
-        return [dict(row) for row in rows]
 
 
 def update_user_subscription(
