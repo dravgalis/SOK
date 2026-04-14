@@ -42,9 +42,12 @@ export function SupportChatWidget({ open, onOpenChange, hideFab = false, onUnrea
 
   useEffect(() => {
     void loadChat();
-    const id = window.setInterval(() => void loadChat(), 10000);
+
+    const pollIntervalMs = isOpen ? 15000 : 3600000;
+    const id = window.setInterval(() => void loadChat(), pollIntervalMs);
+
     return () => window.clearInterval(id);
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen || unreadCount <= 0) return;
