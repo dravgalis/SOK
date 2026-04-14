@@ -71,6 +71,8 @@ class YooKassaService:
                         'quantity': '1.00',
                         'amount': {'value': amount, 'currency': self.currency},
                         'vat_code': 1,
+                        'payment_subject': 'service',
+                        'payment_mode': 'full_prepayment',
                     }
                 ],
             },
@@ -108,6 +110,8 @@ class YooKassaService:
                         'quantity': '1.00',
                         'amount': {'value': amount_value, 'currency': self.currency},
                         'vat_code': 1,
+                        'payment_subject': 'service',
+                        'payment_mode': 'full_prepayment',
                     }
                 ],
             },
