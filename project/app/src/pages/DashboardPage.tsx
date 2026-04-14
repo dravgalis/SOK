@@ -35,7 +35,7 @@ type Vacancy = {
 };
 
 type VacancyTabKey = 'active' | 'archived';
-type PlanCode = '1_month' | '6_months' | '12_months';
+type PlanCode = '1_month' | '6_months' | '12_months' | 'test_month';
 type AccessToast = { x: number; y: number; text: string };
 
 type VacanciesPayload = {
@@ -56,6 +56,7 @@ const PLAN_OPTIONS: { code: PlanCode; label: string; price: string }[] = [
   { code: '1_month', label: '1 месяц', price: '399 ₽' },
   { code: '6_months', label: '6 месяцев', price: '2 150 ₽' },
   { code: '12_months', label: '12 месяцев', price: '3 799 ₽' },
+  { code: 'test_month', label: 'Тест 1 месяц', price: '1 ₽' },
 ];
 
 function formatDate(value?: string | null): string {
@@ -592,5 +593,5 @@ function formatPlanLabel(daysLeft: number, planCode?: string | null): string {
 }
 
 function isPlanCode(value: string): value is PlanCode {
-  return value === '1_month' || value === '6_months' || value === '12_months';
+  return value === '1_month' || value === '6_months' || value === '12_months' || value === 'test_month';
 }

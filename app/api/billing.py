@@ -34,7 +34,7 @@ ALLOWED_STATUSES = {'active', 'inactive', 'past_due', 'canceled'}
 
 
 class CreatePaymentRequest(BaseModel):
-    plan_code: Literal['1_month', '6_months', '12_months']
+    plan_code: Literal['1_month', '6_months', '12_months', 'test_month']
 
 
 class CreateThemePaymentRequest(BaseModel):
@@ -191,7 +191,7 @@ async def my_operations(request: Request) -> dict[str, object]:
             {
                 'payment_id': operation.get('payment_id'),
                 'plan_code': plan_code,
-                'months_extended': _months_for_plan(plan_code) if plan_code in {'1_month', '6_months', '12_months'} else 0,
+                'months_extended': _months_for_plan(plan_code) if plan_code in {'1_month', '6_months', '12_months', 'test_month'} else 0,
                 'amount': operation.get('amount'),
                 'currency': operation.get('currency'),
                 'status': operation.get('status'),
@@ -370,7 +370,7 @@ def _parse_iso(value: object) -> datetime | None:
 
 
 def _months_for_plan(plan_code: str) -> int:
-    mapping = {'1_month': 1, '6_months': 6, '12_months': 12}
+    mapping = {'1_month': 1, '6_months': 6, '12_months': 12, 'test_month': 1}
     months = mapping.get(plan_code)
     if months is None:
         raise HTTPException(status_code=400, detail='Unsupported plan_code.')
