@@ -452,6 +452,23 @@ def get_user_subscription(hh_id: str) -> tuple[str | None, str | None]:
     return status_value, expires_value
 
 
+def get_user_email(hh_id: str) -> str | None:
+    with ENGINE.connect() as connection:
+        row = connection.execute(
+            text('SELECT email FROM users WHERE hh_id = :hh_id'),
+            {'hh_id': hh_id},
+        ).first()
+
+    if row is None:
+        return None
+
+    email_raw = row[0]
+    if not isinstance(email_raw, str):
+        return None
+    email = email_raw.strip()
+    return email or None
+
+
 def get_user_trial_3d_granted(hh_id: str) -> bool | None:
     with ENGINE.connect() as connection:
         row = connection.execute(

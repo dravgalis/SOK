@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from ..core.admin_store import get_user_email
+
 PLANS: dict[str, dict[str, str | int]] = {
     '1_month': {'amount': '399.00', 'months': 1},
     '6_months': {'amount': '2150.00', 'months': 6},
@@ -49,6 +51,8 @@ class YooKassaService:
             raise YooKassaServiceError('YooKassa credentials are not configured.')
 
         amount = self.plan_price(plan_code)
+        description = f'SOK subscription {plan_code}'
+        customer_email = get_user_email(hh_id) or 'user@example.com'
         payload = {
             'amount': {'value': amount, 'currency': self.currency},
             'capture': True,
@@ -56,7 +60,20 @@ class YooKassaService:
                 'type': 'redirect',
                 'return_url': f"{self.frontend_payment_url.rstrip('/')}/payment-return",
             },
-            'description': f'SOK subscription {plan_code}',
+            'description': description,
+            'receipt': {
+                'customer': {
+                    'email': customer_email,
+                },
+                'items': [
+                    {
+                        'description': description,
+                        'quantity': '1.00',
+                        'amount': {'value': amount, 'currency': self.currency},
+                        'vat_code': 1,
+                    }
+                ],
+            },
             'metadata': {'hh_id': hh_id, 'plan_code': plan_code},
         }
         response_data = await self._post_payment(payload)
@@ -71,6 +88,8 @@ class YooKassaService:
         if not self.shop_id or not self.secret_key:
             raise YooKassaServiceError('YooKassa credentials are not configured.')
         amount_value = f'{amount:.2f}'
+        description = f'SOK premium theme {theme_code}'
+        customer_email = get_user_email(hh_id) or 'user@example.com'
         payload = {
             'amount': {'value': amount_value, 'currency': self.currency},
             'capture': True,
@@ -78,7 +97,20 @@ class YooKassaService:
                 'type': 'redirect',
                 'return_url': f"{self.frontend_payment_url.rstrip('/')}/payment-return",
             },
-            'description': f'SOK premium theme {theme_code}',
+            'description': description,
+            'receipt': {
+                'customer': {
+                    'email': customer_email,
+                },
+                'items': [
+                    {
+                        'description': description,
+                        'quantity': '1.00',
+                        'amount': {'value': amount_value, 'currency': self.currency},
+                        'vat_code': 1,
+                    }
+                ],
+            },
             'metadata': {'hh_id': hh_id, 'theme_code': theme_code, 'product_type': 'theme'},
         }
         response_data = await self._post_payment(payload)
