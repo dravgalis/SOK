@@ -105,11 +105,17 @@ async def admin_support_chats(authorization: str | None = Header(default=None)) 
 
 
 @router.get('/support-chats/{hh_id}')
-async def admin_support_chat_messages(hh_id: str, authorization: str | None = Header(default=None)) -> dict[str, object]:
+async def admin_support_chat_messages(
+    hh_id: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    before: str | None = Query(default=None),
+) -> dict[str, object]:
     _require_admin_token(authorization)
     purge_old_support_chats()
-    messages = get_support_chat_messages(hh_id)
-    return {'hh_id': hh_id, 'messages': messages}
+    messages = get_support_chat_messages(hh_id, limit=limit, before=before)
+    has_more = len(messages) == limit
+    return {'hh_id': hh_id, 'messages': messages, 'has_more': has_more}
 
 
 @router.post('/support-chats/{hh_id}/read')

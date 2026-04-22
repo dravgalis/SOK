@@ -369,22 +369,36 @@ def purge_old_support_chats(days: int = 14) -> int:
         return int(result.rowcount or 0)
 
 
-def get_support_chat_messages(hh_id: str, limit: int = 300) -> list[dict[str, object]]:
-    normalized_limit = max(1, min(limit, 1000))
+def get_support_chat_messages(hh_id: str, limit: int = 25, before: str | None = None) -> list[dict[str, object]]:
+    normalized_limit = max(1, min(limit, 100))
     with ENGINE.connect() as connection:
-        rows = connection.execute(
-            text(
-                '''
-                SELECT message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at
-                FROM support_messages
-                WHERE hh_id = :hh_id
-                ORDER BY created_at ASC
-                LIMIT :limit
-                '''
-            ),
-            {'hh_id': hh_id, 'limit': normalized_limit},
-        ).mappings()
-        return [dict(row) for row in rows]
+        if before:
+            rows = connection.execute(
+                text(
+                    '''
+                    SELECT message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at
+                    FROM support_messages
+                    WHERE hh_id = :hh_id AND created_at < :before
+                    ORDER BY created_at DESC, message_id DESC
+                    LIMIT :limit
+                    '''
+                ),
+                {'hh_id': hh_id, 'before': before, 'limit': normalized_limit},
+            ).mappings()
+        else:
+            rows = connection.execute(
+                text(
+                    '''
+                    SELECT message_id, hh_id, message, sender_role, read_by_admin, read_by_user, created_at
+                    FROM support_messages
+                    WHERE hh_id = :hh_id
+                    ORDER BY created_at DESC, message_id DESC
+                    LIMIT :limit
+                    '''
+                ),
+                {'hh_id': hh_id, 'limit': normalized_limit},
+            ).mappings()
+        return [dict(row) for row in reversed(list(rows))]
 
 
 def mark_support_messages_read_by_admin(hh_id: str) -> int:

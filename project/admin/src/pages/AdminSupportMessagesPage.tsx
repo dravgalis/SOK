@@ -18,18 +18,22 @@ type SupportMessage = {
 };
 
 export function AdminSupportMessagesPage() {
+  const PAGE_SIZE = 25;
   const navigate = useNavigate();
   const [chats, setChats] = useState<SupportChat[]>([]);
   const [messages, setMessages] = useState<SupportMessage[]>([]);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [selectedHhId, setSelectedHhId] = useState('');
   const [replyText, setReplyText] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false);
   const selectedChat = chats.find((chat) => chat.hh_id === selectedHhId);
 
   const unreadByChatRef = useRef<Record<string, number>>({});
   const hasLoadedChatsRef = useRef(false);
   const selectedHhIdRef = useRef('');
+  const oldestLoadedAtRef = useRef<string | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
 
   const canNotify = () => typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
 
@@ -65,7 +69,6 @@ export function AdminSupportMessagesPage() {
       return;
     }
     try {
-      setLoading(true);
       const response = await fetch(ADMIN_API.supportChats, {
         headers: { Authorization: `Bearer ${token}` },
         credentials: 'include',
@@ -90,28 +93,68 @@ export function AdminSupportMessagesPage() {
       }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить чаты.');
-    } finally {
-      setLoading(false);
     }
   }, [navigate]);
 
-  const loadMessages = useCallback(async (hhId: string) => {
+  const loadMessages = useCallback(async (hhId: string, loadOlder = false) => {
     const token = getToken();
     if (!token || !hhId) return;
-    const response = await fetch(ADMIN_API.supportChatMessages(hhId), {
+    const requestUrl = new URL(ADMIN_API.supportChatMessages(hhId));
+    requestUrl.searchParams.set('limit', String(PAGE_SIZE));
+    if (loadOlder && oldestLoadedAtRef.current) {
+      requestUrl.searchParams.set('before', oldestLoadedAtRef.current);
+    }
+
+    const messagesContainer = messagesContainerRef.current;
+    const previousHeight = messagesContainer?.scrollHeight ?? 0;
+    const previousTop = messagesContainer?.scrollTop ?? 0;
+
+    if (loadOlder) setLoadingOlderMessages(true);
+    const response = await fetch(requestUrl.toString(), {
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     });
-    if (!response.ok) return;
-    const payload = (await response.json()) as { messages: SupportMessage[] };
-    setMessages(payload.messages || []);
+    if (!response.ok) {
+      setLoadingOlderMessages(false);
+      return;
+    }
+    const payload = (await response.json()) as { messages: SupportMessage[]; has_more?: boolean };
+    const nextMessages = payload.messages || [];
+    setHasMoreMessages(Boolean(payload.has_more));
+
+    if (loadOlder) {
+      setMessages((prev) => {
+        if (!nextMessages.length) return prev;
+        const known = new Set(prev.map((item) => item.message_id));
+        const onlyNew = nextMessages.filter((item) => !known.has(item.message_id));
+        const merged = [...onlyNew, ...prev];
+        if (merged.length > 0) oldestLoadedAtRef.current = merged[0].created_at;
+        return merged;
+      });
+    } else {
+      setMessages(nextMessages);
+      oldestLoadedAtRef.current = nextMessages.length > 0 ? nextMessages[0].created_at : null;
+    }
+
+    requestAnimationFrame(() => {
+      const container = messagesContainerRef.current;
+      if (!container) return;
+      if (loadOlder) {
+        const newHeight = container.scrollHeight;
+        container.scrollTop = newHeight - previousHeight + previousTop;
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+
     await fetch(ADMIN_API.supportChatRead(hhId), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     });
     await loadChats();
-  }, [loadChats]);
+    setLoadingOlderMessages(false);
+  }, [loadChats, PAGE_SIZE]);
 
   useEffect(() => {
     selectedHhIdRef.current = selectedHhId;
@@ -156,8 +199,19 @@ export function AdminSupportMessagesPage() {
 
   useEffect(() => {
     if (!selectedHhId) return;
+    setMessages([]);
+    setHasMoreMessages(false);
+    oldestLoadedAtRef.current = null;
     void loadMessages(selectedHhId);
   }, [selectedHhId, loadMessages]);
+
+  const handleMessagesScroll = () => {
+    if (!selectedHhId || !hasMoreMessages || loadingOlderMessages) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    if (container.scrollTop > 40) return;
+    void loadMessages(selectedHhId, true);
+  };
 
   const handleReply = async () => {
     const token = getToken();
@@ -188,7 +242,6 @@ export function AdminSupportMessagesPage() {
         {error ? <p className="error">{error}</p> : null}
         <div className="support-layout admin-chat-layout">
           <aside className="chat-list admin-chat-list">
-            {loading ? <p>Загрузка...</p> : null}
             {chats.map((chat) => (
               <button
                 key={chat.hh_id}
@@ -212,7 +265,7 @@ export function AdminSupportMessagesPage() {
             ) : (
               <h3>Выберите чат</h3>
             )}
-            <div className="admin-chat-messages">
+            <div className="admin-chat-messages" ref={messagesContainerRef} onScroll={handleMessagesScroll}>
               {messages.map((item) => (
                 <div key={item.message_id} className={`admin-chat-bubble ${item.sender_role === 'admin' ? 'admin-chat-bubble-me' : ''}`}>
                   <p>{item.message}</p>
