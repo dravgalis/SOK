@@ -22,7 +22,7 @@ body {
 
 .card {
   width: 100%;
-  max-width: 1220px;
+  max-width: 1440px;
   padding: 24px;
   border-radius: 12px;
   background: #ffffff;
@@ -74,6 +74,7 @@ button:hover {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 th,
@@ -82,14 +83,17 @@ td {
   padding: 12px 10px;
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 .tableSelect {
-  min-width: 170px;
+  width: 100%;
+  min-width: 140px;
 }
 
 .tableDateInput {
-  min-width: 155px;
+  width: 100%;
+  min-width: 130px;
 }
 
 .tableMetaText {
@@ -143,8 +147,10 @@ td {
   margin-top: 16px;
   display: flex;
   gap: 12px;
+  height: min(70vh, 720px);
   min-height: 520px;
   width: 100%;
+  overflow: hidden;
 }
 
 .chat-list,
@@ -165,11 +171,16 @@ td {
 
 .admin-chat-item {
   text-align: left;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  min-height: 100px;
-  align-content: center;
+  height: 96px;
+  justify-content: center;
   position: relative;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .admin-chat-item-active {
@@ -193,10 +204,12 @@ td {
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 10px;
+  height: 100%;
 }
 
 .admin-chat-messages {
   overflow-y: auto;
+  min-height: 0;
   display: grid;
   gap: 8px;
 }
